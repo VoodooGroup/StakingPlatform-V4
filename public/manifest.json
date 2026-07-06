@@ -1,0 +1,11 @@
+{
+  "name": "Voodoo Staking Portal",
+  "short_name": "Voodoo Staking Portal",
+  "icons": [
+    { "src": "/favicon-32.png", "sizes": "32x32", "type": "image/png" },
+    { "src": "/Voodoo-Token-Logo.png", "sizes": "512x512", "type": "image/png" }
+  ],
+  "theme_color": "#0a2f3c",
+  "background_color": "#0a2f3c",
+  "display": "standalone"
+}

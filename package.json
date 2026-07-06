@@ -1,0 +1,23 @@
+{
+  "name": "voodoo-staking-portal",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "serve": "powershell -NoProfile -ExecutionPolicy Bypass -File serve.ps1",
+    "dev": "next dev",
+    "build": "next build",
+    "vercel-build": "node -e \"console.log('Deploying static site from public/')\"",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "ethers": "6.13.2",
+    "next": "^14.2.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0"
+  },
+  "devDependencies": {
+    "eslint": "^8.57.0",
+    "eslint-config-next": "^14.2.0"
+  }
+}

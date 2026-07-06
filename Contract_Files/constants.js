@@ -1,0 +1,32 @@
+export const VDO_ADDRESS = '0x1c5f8e8E84AcC71650F7a627cfA5B24B80f44f00';
+export const STAKING_ADDRESS = '0x31c6DFC47e3452eE570f6430eD3eB7DE8533d8D0';
+export const RPC_URL = 'https://rpc.pulsechain.com';
+export const PULSECHAIN_CHAIN_ID = '0x171';
+
+export const PULSECHAIN_NETWORK = {
+  chainId: PULSECHAIN_CHAIN_ID,
+  chainName: 'PulseChain',
+  nativeCurrency: { name: 'Pulse', symbol: 'PLS', decimals: 18 },
+  rpcUrls: [RPC_URL],
+  blockExplorerUrls: ['https://scan.pulsechain.com'],
+};
+
+export const POOL_DURATIONS = [2592000, 5184000, 10368000];
+
+export const ERC20_ABI = [
+  'function approve(address spender, uint256 amount) external returns (bool)',
+  'function allowance(address owner, address spender) external view returns (uint256)',
+];
+
+export const LCW_API_KEY = process.env.NEXT_PUBLIC_LCW_API_KEY || 'ddd9175e-6cb0-4fed-babc-8a54cd255c0e';
+
+export const POOLS = [
+  { id: 1, rewardType: 0, duration: 2592000, lockDays: 30, token: 'MAGIC' },
+  { id: 2, rewardType: 0, duration: 5184000, lockDays: 60, token: 'MAGIC' },
+  { id: 3, rewardType: 0, duration: 10368000, lockDays: 120, token: 'MAGIC' },
+  { id: 4, rewardType: 1, duration: 2592000, lockDays: 30, token: 'POISON' },
+  { id: 5, rewardType: 1, duration: 5184000, lockDays: 60, token: 'POISON' },
+  { id: 6, rewardType: 1, duration: 10368000, lockDays: 120, token: 'POISON' },
+];
+
+export const ACTIVE_SINCE = '2023-08-27T00:00:00Z';

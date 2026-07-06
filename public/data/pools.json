@@ -1,0 +1,8 @@
+[
+  { "id": 1, "rewardType": 0, "duration": 2592000, "lockDays": 30, "token": "MAGIC", "logo": "/magic-logo.png" },
+  { "id": 2, "rewardType": 0, "duration": 5184000, "lockDays": 60, "token": "MAGIC", "logo": "/magic-logo.png" },
+  { "id": 3, "rewardType": 0, "duration": 10368000, "lockDays": 120, "token": "MAGIC", "logo": "/magic-logo.png" },
+  { "id": 4, "rewardType": 1, "duration": 2592000, "lockDays": 30, "token": "POISON", "logo": "/poison-logo.png" },
+  { "id": 5, "rewardType": 1, "duration": 5184000, "lockDays": 60, "token": "POISON", "logo": "/poison-logo.png" },
+  { "id": 6, "rewardType": 1, "duration": 10368000, "lockDays": 120, "token": "POISON", "logo": "/poison-logo.png" }
+]

@@ -1,0 +1,27 @@
+{
+  "name": "StakingPlatformV4",
+  "displayName": "Voodoo Staking Portal",
+  "footerText": "© 2026 Voodoo Token • All rights reserved",
+  "contract": "0x31c6DFC47e3452eE570f6430eD3eB7DE8533d8D0",
+  "assets": {
+    "magicLogo": "/Magic-Reward-Token-Logo.png",
+    "poisonLogo": "/Poison-Reward-Token-Logo.jpg",
+    "voodooLogo": "/Voodoo-Token-Logo.png",
+    "favicon": "/Voodoo-Token-Logo.png",
+    "favicon32": "/favicon-32.png",
+    "favicon16": "/favicon-16.png",
+    "buttonGuide": "/button-1.png",
+    "flowIcons": "/icons.png",
+    "calculator": "/voodoo-token-calculator.png",
+    "background": "/voodoo-token-background.png",
+    "backgroundFallback": "/voodoo-token-background.jpg"
+  },
+  "pools": [
+    { "id": 1, "rewardType": 0, "duration": 2592000, "lockDays": 30, "token": "MAGIC", "logoKey": "magicLogo" },
+    { "id": 2, "rewardType": 0, "duration": 5184000, "lockDays": 60, "token": "MAGIC", "logoKey": "magicLogo" },
+    { "id": 3, "rewardType": 0, "duration": 10368000, "lockDays": 120, "token": "MAGIC", "logoKey": "magicLogo" },
+    { "id": 4, "rewardType": 1, "duration": 2592000, "lockDays": 30, "token": "POISON", "logoKey": "poisonLogo" },
+    { "id": 5, "rewardType": 1, "duration": 5184000, "lockDays": 60, "token": "POISON", "logoKey": "poisonLogo" },
+    { "id": 6, "rewardType": 1, "duration": 10368000, "lockDays": 120, "token": "POISON", "logoKey": "poisonLogo" }
+  ]
+}
