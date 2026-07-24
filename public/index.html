@@ -31,10 +31,19 @@
         <img data-sp4="calculator" src="/voodoo-token-calculator.png" alt="Calculator" class="h-[47px] w-auto rounded hover:opacity-90 transition-opacity cursor-pointer" style="background:transparent" />
       </a>
     </div>
-    <div class="pr-4">
-      <button id="connectBtn" class="bg-blue-800 hover:bg-blue-700 text-white px-6 py-2 rounded transition duration-300 ease-in-out font-mono">
-        Connect Wallet
-      </button>
+    <div class="pr-4 wallet-actions">
+      <button
+        type="button"
+        id="voodooWalletBtn"
+        class="wallet-btn wallet-btn-voodoo"
+        title="Connect with Voodoo Wallet browser extension"
+      >Voodoo Wallet</button>
+      <button
+        type="button"
+        id="connectBtn"
+        class="wallet-btn wallet-btn-injected"
+        title="Connect with MetaMask"
+      >MetaMask</button>
     </div>
   </nav>
 
@@ -94,17 +103,17 @@
     </div>
   </div>
 
-  <script src="/js/config.js"></script>
-  <script src="/js/StakingPlatformV4.js"></script>
-  <script src="/js/stakingAbi.js"></script>
-  <script src="/js/contracts.js"></script>
-  <script src="/js/wallet.js"></script>
-  <script src="/js/apy.js"></script>
-  <script src="/js/calculator.js"></script>
-  <script src="/js/pools.js"></script>
-  <script src="/js/poolRenderer.js"></script>
-  <script src="/js/activeSince.js"></script>
-  <script src="/js/app.js"></script>
+  <script src="/js/config.js?v=14"></script>
+  <script src="/js/StakingPlatformV4.js?v=14"></script>
+  <script src="/js/stakingAbi.js?v=14"></script>
+  <script src="/js/contracts.js?v=14"></script>
+  <script src="/js/wallet.js?v=14"></script>
+  <script src="/js/apy.js?v=14"></script>
+  <script src="/js/calculator.js?v=14"></script>
+  <script src="/js/pools.js?v=14"></script>
+  <script src="/js/poolRenderer.js?v=14"></script>
+  <script src="/js/activeSince.js?v=14"></script>
+  <script src="/js/app.js?v=15"></script>
   <script>
     (function () {
       var modal = document.getElementById('calculatorModal');

@@ -108,40 +108,79 @@ window.VoodooPools = (function () {
   function bindActions(getContracts) {
     document.querySelectorAll('[id^="stakeBtn"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const { stakingContract } = getContracts();
+        const { stakingContract, userAddress } = getContracts();
+        if (!stakingContract || !userAddress) {
+          alert('Connect Voodoo Wallet first');
+          return;
+        }
         const num = btn.id.replace('stakeBtn', '');
         const input = document.getElementById(`amount${num}`);
         const val = input.value.trim();
-        if (!val || Number(val) <= 0) return;
+        if (!val || Number(val) <= 0) {
+          alert('Enter a VDO amount to stake');
+          return;
+        }
+        const prev = btn.textContent;
         try {
+          btn.disabled = true;
+          btn.textContent = 'Open wallet…';
           const amount = ethers.utils.parseUnits(val, 18);
           const wrapper = btn.closest('.pool-wrapper');
           const rewardType = parseInt(wrapper.dataset.rewardType || '0', 10);
           const duration = parseInt(wrapper.dataset.duration || '2592000', 10);
           const tx = await stakingContract.stake(amount, rewardType, duration);
+          btn.textContent = 'Confirming…';
           await tx.wait();
           input.value = '';
+          btn.textContent = prev || 'Stake';
+          btn.disabled = false;
           alert('Stake successful!');
         } catch (e) {
           console.error('Stake failed', e);
-          alert('Stake transaction failed: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = prev || 'Stake';
+          const msg = e?.reason || e?.data?.message || e?.message || String(e);
+          alert(
+            'Stake failed:\n\n'
+            + msg
+            + '\n\nTip: approve VDO first, then confirm the stake tx in Voodoo Wallet.',
+          );
         }
       });
     });
 
     document.querySelectorAll('[id^="approve"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
-        const { vdoContract } = getContracts();
+        const { vdoContract, userAddress } = getContracts();
+        if (!vdoContract || !userAddress) {
+          alert('Connect Voodoo Wallet first');
+          return;
+        }
         const { STAKING_ADDRESS } = window.VoodooConfig;
+        const prev = btn.textContent;
         try {
+          btn.disabled = true;
+          btn.textContent = 'Open wallet…';
+          // eth_sendTransaction → approve in Voodoo Wallet popup (red ! if needed)
           const tx = await vdoContract.approve(STAKING_ADDRESS, ethers.constants.MaxUint256);
+          btn.textContent = 'Confirming…';
           await tx.wait();
-          document.querySelectorAll('[id^="approve"]').forEach((b) => { b.disabled = true; });
+          document.querySelectorAll('[id^="approve"]').forEach((b) => {
+            b.disabled = true;
+            b.textContent = 'Approved';
+          });
           document.querySelectorAll('[id^="stakeBtn"]').forEach((b) => { b.disabled = false; });
-          alert('Approval successful!');
+          alert('Approval successful! You can stake now.');
         } catch (e) {
           console.error('Approve failed', e);
-          alert('Approval failed: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = prev || 'Approve';
+          const msg = e?.reason || e?.data?.message || e?.message || String(e);
+          alert(
+            'Approval failed:\n\n'
+            + msg
+            + '\n\nTip: open Voodoo Wallet (red !), click Approve on the transaction, and keep the wallet unlocked.',
+          );
         }
       });
     });

@@ -7,7 +7,7 @@ function voodooRpcUrl() {
 
 window.VoodooConfig = {
   PLATFORM_MAP: 'StakingPlatformV4',
-  ASSET_VERSION: '6',
+  ASSET_VERSION: '14',
   VDO_ADDRESS: '0x1c5f8e8E84AcC71650F7a627cfA5B24B80f44f00',
   STAKING_ADDRESS: '0x31c6DFC47e3452eE570f6430eD3eB7DE8533d8D0',
   get RPC_URL() { return voodooRpcUrl(); },

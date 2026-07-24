@@ -1,105 +1,404 @@
 window.VoodooWallet = (function () {
+  const VOODOO_RDNS = 'app.voodoowallet';
+  const VOODOO_INSTALL_URL = 'https://github.com/Voodoo-Token/voodoo-pulse-extension';
+  const PULSE_CHAIN_ID = 369;
+  const PULSE_CHAIN_HEX = '0x171';
+
+  let listenersBound = false;
+  /** @type {any} */
+  let activeProvider = null;
+  /** @type {'voodoo'|'injected'|null} */
+  let activeWalletKind = null;
+
   function pulsechainNetwork() {
     return window.VoodooConfig.PULSECHAIN_NETWORK;
   }
-  let listenersBound = false;
 
-  function getMetaMaskProvider() {
-    if (typeof window === 'undefined') return null;
-    if (window.location.protocol === 'file:') return null;
+  function isVoodooProvider(provider) {
+    if (!provider) return false;
+    if (provider.isVoodooWallet === true || provider._isVoodooWallet === true) return true;
+    if (provider === window.voodooEthereum || provider === window.VoodooWalletProvider) return true;
+    if (typeof provider.providerInfo?.rdns === 'string'
+      && provider.providerInfo.rdns.toLowerCase() === VOODOO_RDNS) {
+      return true;
+    }
+    return false;
+  }
+
+  function listInjectedProviders() {
+    if (typeof window === 'undefined') return [];
+    if (window.location.protocol === 'file:') return [];
+
+    const found = [];
+    const push = (p) => {
+      if (p && !found.includes(p)) found.push(p);
+    };
+
+    // Dedicated globals from Voodoo Wallet extension (survive MetaMask overwrite)
+    push(window.voodooEthereum);
+    push(window.VoodooWalletProvider);
 
     const { ethereum } = window;
-    if (!ethereum) return null;
-
-    if (Array.isArray(ethereum.providers) && ethereum.providers.length) {
-      const mm = ethereum.providers.find((p) => p.isMetaMask);
-      if (mm) return mm;
-      return ethereum.providers[0];
+    if (ethereum) {
+      if (Array.isArray(ethereum.providers) && ethereum.providers.length) {
+        ethereum.providers.forEach(push);
+      }
+      push(ethereum);
     }
+    return found;
+  }
 
-    if (ethereum.isMetaMask || ethereum._metamask || ethereum.isStatus) {
-      return ethereum;
+  function discoverVoodooViaEip6963(timeoutMs = 900) {
+    return new Promise((resolve) => {
+      if (typeof window === 'undefined') {
+        resolve(null);
+        return;
+      }
+
+      let found = null;
+      let settled = false;
+
+      function finish(provider) {
+        if (settled) return;
+        settled = true;
+        window.removeEventListener('eip6963:announceProvider', onAnnounce);
+        resolve(provider || null);
+      }
+
+      function onAnnounce(event) {
+        const detail = event.detail;
+        const info = detail?.info;
+        const provider = detail?.provider;
+        if (!provider) return;
+
+        const rdns = String(info?.rdns || '').toLowerCase();
+        const name = String(info?.name || '');
+        if (
+          rdns === VOODOO_RDNS
+          || /voodoo\s*wallet/i.test(name)
+          || isVoodooProvider(provider)
+        ) {
+          found = provider;
+          finish(found);
+        }
+      }
+
+      window.addEventListener('eip6963:announceProvider', onAnnounce);
+      try {
+        window.dispatchEvent(new Event('eip6963:requestProvider'));
+      } catch {
+        /* ignore */
+      }
+
+      setTimeout(() => finish(found), timeoutMs);
+    });
+  }
+
+  function getMetaMaskProvider() {
+    const providers = listInjectedProviders();
+    if (!providers.length) return null;
+
+    const mm = providers.find((p) => p.isMetaMask && !isVoodooProvider(p));
+    if (mm) return mm;
+
+    const anyMm = providers.find((p) => (p.isMetaMask || p._metamask || p.isStatus) && !isVoodooProvider(p));
+    if (anyMm) return anyMm;
+
+    const other = providers.find((p) => !isVoodooProvider(p));
+    return other || providers[0];
+  }
+
+  function findVoodooSync() {
+    if (window.voodooEthereum && isVoodooProvider(window.voodooEthereum)) {
+      return window.voodooEthereum;
     }
+    if (window.VoodooWalletProvider && isVoodooProvider(window.VoodooWalletProvider)) {
+      return window.VoodooWalletProvider;
+    }
+    return listInjectedProviders().find(isVoodooProvider) || null;
+  }
 
-    return ethereum;
+  async function getVoodooWalletProvider(options = {}) {
+    const attempts = options.attempts ?? 10;
+    const delayMs = options.delayMs ?? 300;
+
+    for (let i = 0; i < attempts; i += 1) {
+      const sync = findVoodooSync();
+      if (sync) return sync;
+
+      const fromEip6963 = await discoverVoodooViaEip6963(i === 0 ? 700 : 400);
+      if (fromEip6963) return fromEip6963;
+
+      if (i < attempts - 1) {
+        await new Promise((r) => setTimeout(r, delayMs));
+      }
+    }
+    return null;
+  }
+
+  /** Snapshot for debugging connection problems */
+  async function diagnose() {
+    const eth = window.ethereum;
+    return {
+      origin: window.location.origin,
+      protocol: window.location.protocol,
+      hasEthereum: Boolean(eth),
+      ethIsVoodoo: Boolean(eth?.isVoodooWallet),
+      ethIsMetaMask: Boolean(eth?.isMetaMask),
+      hasVoodooGlobal: Boolean(window.voodooEthereum?.isVoodooWallet),
+      providers: listInjectedProviders().map((p, i) => ({
+        i,
+        isVoodoo: Boolean(p?.isVoodooWallet),
+        isMetaMask: Boolean(p?.isMetaMask),
+      })),
+      eip6963: Boolean(await discoverVoodooViaEip6963(400)),
+    };
+  }
+
+  async function readChainId(ethereum) {
+    try {
+      if (ethereum.chainId != null) {
+        const raw = ethereum.chainId;
+        if (typeof raw === 'string' && raw.startsWith('0x')) return parseInt(raw, 16);
+        if (typeof raw === 'number') return raw;
+      }
+      const hex = await ethereum.request({ method: 'eth_chainId' });
+      return parseInt(hex, 16);
+    } catch {
+      return null;
+    }
   }
 
   async function switchToPulseChain(ethereum) {
     try {
       await ethereum.request({
         method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x171' }],
+        params: [{ chainId: PULSE_CHAIN_HEX }],
       });
     } catch (switchErr) {
-      if (switchErr.code === 4902) {
-        await ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [pulsechainNetwork()],
-        });
+      if (switchErr?.code === 4902) {
+        try {
+          await ethereum.request({
+            method: 'wallet_addEthereumChain',
+            params: [pulsechainNetwork()],
+          });
+        } catch (addErr) {
+          if (isVoodooProvider(ethereum)) return;
+          throw addErr;
+        }
+      } else if (isVoodooProvider(ethereum)) {
+        return;
       } else {
         throw switchErr;
       }
     }
   }
 
-  async function connect() {
-    const ethereum = getMetaMaskProvider();
+  function mapRequestError(err, kind) {
+    const msg = err?.message || String(err || 'Unknown error');
+    const code = err?.code;
+
+    if (code === 4001 || /user rejected|rejected the request/i.test(msg)) {
+      return new Error('Verbinding geannuleerd — je hebt het verzoek afgewezen in de wallet.');
+    }
+    if (code === 'VOODOO_TIMEOUT' || /geen antwoord/i.test(msg)) {
+      return new Error(
+        'Geen antwoord van Voodoo Wallet.\n\n'
+        + '1. Klik het Voodoo-icoon (rode !)\n'
+        + '2. Log in\n'
+        + '3. chrome://extensions → Reload Voodoo Wallet\n'
+        + '4. Deze pagina Ctrl+F5\n'
+        + '5. Opnieuw “Voodoo Wallet” klikken',
+      );
+    }
+    if (
+      code === 4100
+      || /unlock voodoo wallet first/i.test(msg)
+      || /wallet locked/i.test(msg)
+    ) {
+      return new Error(
+        'Voodoo Wallet is vergrendeld of niet klaar.\n\n'
+        + '1. Klik het Voodoo Wallet icoon in Chrome (rood ! als die er is)\n'
+        + '2. Log in met je wachtwoord\n'
+        + '3. Herlaad de extensie als het blijft falen (chrome://extensions → Reload)\n'
+        + '4. Klik opnieuw op “Voodoo Wallet” op deze pagina',
+      );
+    }
+    if (code === 'VOODOO_NOT_FOUND' || /not detected|niet gevonden/i.test(msg)) {
+      const e = new Error(msg);
+      e.code = 'VOODOO_NOT_FOUND';
+      e.installUrl = VOODOO_INSTALL_URL;
+      return e;
+    }
+    return err instanceof Error ? err : new Error(msg);
+  }
+
+  async function connectWithProvider(ethereum, kind, onStatus) {
     if (!ethereum) {
       if (window.location.protocol === 'file:') {
-        throw new Error('Open via START.bat at http://localhost:8080 (MetaMask cannot use file://)');
+        throw new Error('Open via http://localhost:8080 (extensies werken niet op file://)');
       }
-      throw new Error('MetaMask not detected. Install the extension and refresh this page.');
+      throw mapRequestError(
+        Object.assign(
+          new Error(
+            kind === 'voodoo'
+              ? 'Voodoo Wallet niet gedetecteerd. Herlaad de extensie en deze pagina.'
+              : 'Geen browser wallet gevonden.',
+          ),
+          { code: kind === 'voodoo' ? 'VOODOO_NOT_FOUND' : undefined },
+        ),
+        kind,
+      );
     }
 
-    const accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+    let accounts;
+    try {
+      onStatus?.('requesting');
+      accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+      onStatus?.('connected');
+    } catch (err) {
+      throw mapRequestError(err, kind);
+    }
+
     if (!accounts?.length) {
-      throw new Error('No wallet account selected in MetaMask');
+      throw new Error(
+        'Geen account ontvangen van Voodoo Wallet.\n\n'
+        + 'Open de extensie, log in, en probeer opnieuw.\n'
+        + 'Zorg dat je de nieuwste build geladen hebt (chrome://extensions → Reload).',
+      );
     }
 
-    let provider = new ethers.providers.Web3Provider(ethereum, 'any');
-    let network = await provider.getNetwork();
-
-    if (Number(network.chainId) !== 369) {
-      await switchToPulseChain(ethereum);
-      await new Promise((r) => setTimeout(r, 600));
-      provider = new ethers.providers.Web3Provider(ethereum, 'any');
-      network = await provider.getNetwork();
-      if (Number(network.chainId) !== 369) {
-        throw new Error('Switch MetaMask to PulseChain (chain 369) and try again');
+    let chainId = await readChainId(ethereum);
+    if (chainId !== PULSE_CHAIN_ID) {
+      try {
+        await switchToPulseChain(ethereum);
+        await new Promise((r) => setTimeout(r, 400));
+        chainId = await readChainId(ethereum);
+      } catch (e) {
+        console.warn('Chain switch attempt:', e?.message || e);
+      }
+      if (chainId !== PULSE_CHAIN_ID && kind !== 'voodoo') {
+        throw new Error('Zet je wallet op PulseChain (chain 369) en probeer opnieuw');
       }
     }
 
-    const signer = provider.getSigner();
-    const userAddress = await signer.getAddress();
+    let provider;
+    let signer;
+    let userAddress = accounts[0];
+    try {
+      provider = new ethers.providers.Web3Provider(ethereum, 'any');
+      if (kind === 'voodoo' || isVoodooProvider(ethereum)) {
+        try {
+          await provider.getNetwork();
+        } catch {
+          provider = new ethers.providers.Web3Provider(ethereum, {
+            name: 'PulseChain',
+            chainId: PULSE_CHAIN_ID,
+          });
+        }
+      }
+      signer = provider.getSigner();
+      try {
+        const fromSigner = await signer.getAddress();
+        if (fromSigner) userAddress = fromSigner;
+      } catch {
+        /* use accounts[0] */
+      }
+    } catch (err) {
+      // Still usable with accounts[0] if ethers network detect fails
+      console.warn('ethers provider setup warning', err);
+      provider = new ethers.providers.Web3Provider(ethereum, {
+        name: 'PulseChain',
+        chainId: PULSE_CHAIN_ID,
+      });
+      signer = provider.getSigner();
+      userAddress = accounts[0];
+    }
 
-    return { ethereum, provider, signer, userAddress };
+    activeProvider = ethereum;
+    activeWalletKind = kind;
+
+    return { ethereum, provider, signer, userAddress, walletKind: kind };
+  }
+
+  async function connect() {
+    const ethereum = getMetaMaskProvider();
+    return connectWithProvider(ethereum, 'injected');
+  }
+
+  async function connectVoodoo(onStatus) {
+    onStatus?.('detecting');
+    const ethereum = await getVoodooWalletProvider();
+    if (!ethereum) {
+      const info = await diagnose();
+      console.error('[Voodoo diagnose]', info);
+      const err = new Error(
+        'Voodoo Wallet niet gevonden op deze pagina.\n\n'
+        + 'Doe dit exact:\n'
+        + '1. chrome://extensions → Load unpacked:\n'
+        + '   C:\\Users\\ReMarkt\\voodoo-pulse-extension\n'
+        + '2. Reload de extensie na elke npm run build\n'
+        + '3. Open Voodoo Wallet en LOG IN eerst\n'
+        + '4. Deze pagina Ctrl+F5, dan opnieuw verbinden\n\n'
+        + `Debug: ethereum=${info.hasEthereum} voodooGlobal=${info.hasVoodooGlobal} isVoodoo=${info.ethIsVoodoo} bridge=${Boolean(window.__VOODOO_BRIDGE_READY__)}`,
+      );
+      err.code = 'VOODOO_NOT_FOUND';
+      err.installUrl = VOODOO_INSTALL_URL;
+      err.diagnose = info;
+      throw err;
+    }
+    onStatus?.('opening');
+    return connectWithProvider(ethereum, 'voodoo', onStatus);
+  }
+
+  function getActiveProvider() {
+    return activeProvider || findVoodooSync() || getMetaMaskProvider();
+  }
+
+  function getActiveWalletKind() {
+    return activeWalletKind;
+  }
+
+  function clearActiveWallet() {
+    activeProvider = null;
+    activeWalletKind = null;
   }
 
   function bindListeners(onAccountsChanged, onChainChanged) {
-    const ethereum = getMetaMaskProvider();
-    if (!ethereum || listenersBound) return;
+    const ethereum = getActiveProvider();
+    if (!ethereum) return;
+
+    if (listenersBound && ethereum === activeProvider) return;
     listenersBound = true;
 
-    ethereum.on('accountsChanged', (accounts) => {
-      if (!accounts?.length) {
-        onAccountsChanged?.(null);
-        return;
-      }
-      onAccountsChanged?.(accounts[0]);
-    });
+    try {
+      ethereum.on('accountsChanged', (accounts) => {
+        if (!accounts?.length) {
+          clearActiveWallet();
+          onAccountsChanged?.(null);
+          return;
+        }
+        onAccountsChanged?.(accounts[0]);
+      });
 
-    ethereum.on('chainChanged', () => {
-      onChainChanged?.();
-    });
+      ethereum.on('chainChanged', () => {
+        onChainChanged?.();
+      });
+    } catch (e) {
+      console.warn('Wallet event listeners not supported', e);
+    }
   }
 
   async function registerVoodooToken(ethereum) {
+    const target = ethereum || getActiveProvider();
+    if (!target || isVoodooProvider(target)) return;
+
     const { VDO_ADDRESS } = window.VoodooConfig;
     const image = window.StakingPlatformV4?.getVoodooLogoUrl()
       || `${window.location.origin}/Voodoo-Token-Logo.png`;
 
     try {
-      const added = await ethereum.request({
+      await target.request({
         method: 'wallet_watchAsset',
         params: {
           type: 'ERC20',
@@ -111,11 +410,24 @@ window.VoodooWallet = (function () {
           },
         },
       });
-      if (added) console.log('Voodoo token logo registered in MetaMask:', image);
     } catch (e) {
       console.warn('Token logo registration skipped', e);
     }
   }
 
-  return { getMetaMaskProvider, connect, bindListeners, registerVoodooToken };
+  return {
+    getMetaMaskProvider,
+    getVoodooWalletProvider,
+    isVoodooProvider,
+    connect,
+    connectVoodoo,
+    connectWithProvider,
+    bindListeners,
+    registerVoodooToken,
+    getActiveProvider,
+    getActiveWalletKind,
+    clearActiveWallet,
+    diagnose,
+    VOODOO_INSTALL_URL,
+  };
 })();
