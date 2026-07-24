@@ -1,5 +1,9 @@
 export const VDO_ADDRESS = '0x1c5f8e8E84AcC71650F7a627cfA5B24B80f44f00';
-export const STAKING_ADDRESS = '0x31c6DFC47e3452eE570f6430eD3eB7DE8533d8D0';
+/** StakingPlatform V4 — single source of truth (never V2 0x31c6…) */
+export const STAKING_PLATFORM_V4 = '0x3359EcA752F8fCa2A1E47EF01160CFCd782BD6E7';
+export const STAKING_ADDRESS = STAKING_PLATFORM_V4;
+/** @deprecated Legacy V2 — do not use */
+export const STAKING_V2_LEGACY = '0x31c6DFC47e3452eE570f6430eD3eB7DE8533d8D0';
 export const RPC_URL = 'https://rpc.pulsechain.com';
 export const PULSECHAIN_CHAIN_ID = '0x171';
 

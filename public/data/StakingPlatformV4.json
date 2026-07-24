@@ -1,8 +1,8 @@
 {
   "name": "StakingPlatformV4",
   "displayName": "Voodoo Staking Portal",
-  "footerText": "© 2026 Voodoo Token • All rights reserved",
-  "contract": "0x31c6DFC47e3452eE570f6430eD3eB7DE8533d8D0",
+  "footerText": "© 2026 VoodooGroup • All rights reserved",
+  "contract": "0x3359EcA752F8fCa2A1E47EF01160CFCd782BD6E7",
   "assets": {
     "magicLogo": "/Magic-Reward-Token-Logo.png",
     "poisonLogo": "/Poison-Reward-Token-Logo.jpg",

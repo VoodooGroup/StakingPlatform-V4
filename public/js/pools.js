@@ -39,7 +39,9 @@ window.VoodooPools = (function () {
     btn.disabled = true;
 
     try {
-      const stakes = await stakingContract.getAllUserStakings(userAddress);
+      // View call via public RPC (wallet injectors can break eth_call after Voodoo connect)
+      const reader = window.VoodooContracts.readStaking();
+      const stakes = await reader.getAllUserStakings(userAddress);
       select.innerHTML = '<option value="">Select a stake to unstake...</option>';
       let hasStake = false;
       let earliestUnlock = Infinity;
@@ -86,7 +88,9 @@ window.VoodooPools = (function () {
 
         if (btn.id.startsWith('rewardTab')) {
           stakeContent.classList.add('hidden');
+          stakeContent.setAttribute('aria-hidden', 'true');
           rewardContent.classList.remove('hidden');
+          rewardContent.setAttribute('aria-hidden', 'false');
           rewardTab.classList.add('tab-active');
           rewardTab.classList.remove('tab-inactive');
           stakeTab.classList.add('tab-inactive');
@@ -95,7 +99,9 @@ window.VoodooPools = (function () {
           await loadStakes(num, stakingContract, userAddress);
         } else {
           stakeContent.classList.remove('hidden');
+          stakeContent.setAttribute('aria-hidden', 'false');
           rewardContent.classList.add('hidden');
+          rewardContent.setAttribute('aria-hidden', 'true');
           stakeTab.classList.add('tab-active');
           stakeTab.classList.remove('tab-inactive');
           rewardTab.classList.add('tab-inactive');
@@ -105,82 +111,226 @@ window.VoodooPools = (function () {
     });
   }
 
+  /**
+   * User ignored wallet / cancelled / any wait failure — NEVER show an alert.
+   * Especially: Approve/Stake clicked but no reaction in the extension.
+   */
+  function isQuietWalletCancel(err) {
+    const msg = String(err?.reason || err?.data?.message || err?.message || err || '').toLowerCase();
+    const code = err?.code;
+    return (
+      code === 4001
+      || code === 'VOODOO_TIMEOUT'
+      || code === 'ACTION_REJECTED'
+      || code === 'TIMEOUT'
+      || code === -32000
+      || /user rejected|user denied|rejected the request|rejected|timeout|timed out|geen antwoord|cancel|aborted|extensie reageert niet|wallet gaf geen|confirm in wallet/i.test(msg)
+    );
+  }
+
   function bindActions(getContracts) {
+    function flashAmountInput(input) {
+      if (!input) return;
+      input.focus();
+      input.classList.add('amount-needs-value');
+      input.setAttribute('placeholder', 'Enter VDO amount');
+      window.setTimeout(() => {
+        input.classList.remove('amount-needs-value');
+      }, 1600);
+    }
+
     document.querySelectorAll('[id^="stakeBtn"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const { stakingContract, userAddress } = getContracts();
         if (!stakingContract || !userAddress) {
-          alert('Connect Voodoo Wallet first');
+          // Soft — no chrome alert; connect button is in the header
+          console.warn('Connect Voodoo Wallet first');
+          document.getElementById('voodooWalletBtn')?.focus();
           return;
         }
         const num = btn.id.replace('stakeBtn', '');
         const input = document.getElementById(`amount${num}`);
-        const val = input.value.trim();
+        const val = (input?.value || '').trim();
+        // No chrome alert — highlight amount field so user fills it, then Stake opens wallet
         if (!val || Number(val) <= 0) {
-          alert('Enter a VDO amount to stake');
+          flashAmountInput(input);
           return;
         }
         const prev = btn.textContent;
         try {
           btn.disabled = true;
-          btn.textContent = 'Open wallet…';
+          // Short label only — long text resized pool cards (CSS conflict)
+          btn.textContent = 'Confirm…';
           const amount = ethers.utils.parseUnits(val, 18);
           const wrapper = btn.closest('.pool-wrapper');
           const rewardType = parseInt(wrapper.dataset.rewardType || '0', 10);
           const duration = parseInt(wrapper.dataset.duration || '2592000', 10);
-          const tx = await stakingContract.stake(amount, rewardType, duration);
-          btn.textContent = 'Confirming…';
-          await tx.wait();
+          // Opens Voodoo Wallet with stake summary (amount / pool / gas)
+          const tx = await stakingContract.stake(amount, rewardType, duration, {
+            gasLimit: 550000,
+          });
+
+          // Hash received → public-RPC receipt wait (wallet tx.wait hangs forever)
+          btn.textContent = 'Pending…';
+          const hash = tx?.hash || tx;
+          const receipt = window.VoodooContracts.waitForReceipt
+            ? await window.VoodooContracts.waitForReceipt(hash, 120_000)
+            : await Promise.race([
+              tx.wait().catch(() => null),
+              new Promise((r) => setTimeout(() => r(null), 120_000)),
+            ]);
+
+          if (!receipt) {
+            // Unstick UI — tx may still be mining on a slow RPC
+            console.warn('Stake tx submitted, confirmation timed out:', hash);
+            btn.textContent = prev || 'Stake';
+            btn.disabled = false;
+            return;
+          }
+
+          const status = receipt.status;
+          const ok = status === 1 || status === '0x1' || Number(status) === 1;
+          if (!ok) {
+            throw new Error('Stake transaction reverted on-chain');
+          }
+
           input.value = '';
           btn.textContent = prev || 'Stake';
           btn.disabled = false;
-          alert('Stake successful!');
+          // Refresh reward tab data quietly if open
+          try {
+            const rewardTab = document.getElementById(`rewardTab${num}`);
+            if (rewardTab && rewardTab.classList.contains('tab-active')) {
+              rewardTab.click();
+            }
+          } catch {
+            /* ignore */
+          }
         } catch (e) {
           console.error('Stake failed', e);
           btn.disabled = false;
           btn.textContent = prev || 'Stake';
+          if (isQuietWalletCancel(e)) return;
           const msg = e?.reason || e?.data?.message || e?.message || String(e);
-          alert(
-            'Stake failed:\n\n'
-            + msg
-            + '\n\nTip: approve VDO first, then confirm the stake tx in Voodoo Wallet.',
-          );
+          if (/timeout|timed out|geen antwoord|no response|reageert niet|insufficient funds/i.test(String(msg))) {
+            return;
+          }
+          // Keep failures quiet on site — extension shows the real error
+          console.warn('Stake failed:', msg);
         }
       });
     });
+
+    function markAllApproved() {
+      document.querySelectorAll('[id^="approve"]').forEach((b) => {
+        b.disabled = true;
+        b.textContent = 'Approved';
+      });
+      document.querySelectorAll('[id^="stakeBtn"]').forEach((b) => { b.disabled = false; });
+    }
+
+    function isPositiveAllowance(allowance) {
+      if (allowance == null) return false;
+      try {
+        if (typeof allowance.gt === 'function') return allowance.gt(0);
+        if (typeof allowance === 'bigint') return allowance > 0n;
+        return Number(allowance) > 0;
+      } catch {
+        return false;
+      }
+    }
+
+    /** Poll public RPC for allowance — reliable after wallet returns a tx hash */
+    async function waitUntilApproved(userAddress, maxMs = 90_000) {
+      // Always V4 spender (never legacy V2)
+      const stakingAddr = window.VoodooContracts.stakingAddress?.()
+        || window.VoodooConfig.STAKING_ADDRESS;
+      const started = Date.now();
+      while (Date.now() - started < maxMs) {
+        try {
+          const allowance = await window.VoodooContracts.withReadFailover(async (provider) => {
+            const vdo = window.VoodooContracts.readVdo(provider);
+            return vdo.allowance(userAddress, stakingAddr);
+          });
+          if (isPositiveAllowance(allowance)) return true;
+        } catch (e) {
+          console.warn('Allowance poll failed', e?.message || e);
+        }
+        await new Promise((r) => setTimeout(r, 2000));
+      }
+      return false;
+    }
 
     document.querySelectorAll('[id^="approve"]').forEach((btn) => {
       btn.addEventListener('click', async () => {
         const { vdoContract, userAddress } = getContracts();
         if (!vdoContract || !userAddress) {
-          alert('Connect Voodoo Wallet first');
+          console.warn('Connect Voodoo Wallet first');
+          document.getElementById('voodooWalletBtn')?.focus();
           return;
         }
-        const { STAKING_ADDRESS } = window.VoodooConfig;
+        const stakingAddr = window.VoodooContracts.stakingAddress?.()
+          || window.VoodooConfig.STAKING_ADDRESS;
         const prev = btn.textContent;
         try {
           btn.disabled = true;
-          btn.textContent = 'Open wallet…';
-          // eth_sendTransaction → approve in Voodoo Wallet popup (red ! if needed)
-          const tx = await vdoContract.approve(STAKING_ADDRESS, ethers.constants.MaxUint256);
-          btn.textContent = 'Confirming…';
-          await tx.wait();
+          // Short fixed label — long text resized pool cards
+          btn.textContent = 'Confirm…';
+          // gasLimit: skip eth_estimateGas through wallet
+          // Spender must be StakingPlatform V4 only
+          const tx = await vdoContract.approve(
+            stakingAddr,
+            ethers.constants.MaxUint256,
+            { gasLimit: 120000 },
+          );
+
+          // Hash received from extension → confirmation phase
+          btn.textContent = 'Pending…';
           document.querySelectorAll('[id^="approve"]').forEach((b) => {
-            b.disabled = true;
-            b.textContent = 'Approved';
+            if (b !== btn) {
+              b.disabled = true;
+              b.textContent = 'Pending…';
+            }
           });
-          document.querySelectorAll('[id^="stakeBtn"]').forEach((b) => { b.disabled = false; });
-          alert('Approval successful! You can stake now.');
+
+          // Public-RPC allowance poll (do not rely on wallet receipt alone)
+          if (tx?.wait) {
+            tx.wait(1).catch(() => null);
+          }
+          const success = await waitUntilApproved(userAddress, 90_000);
+          if (!success) {
+            // Still enable stake if we got a hash — allowance may lag one poll cycle
+            const late = await waitUntilApproved(userAddress, 15_000);
+            if (!late) {
+              console.warn('Approval submitted; allowance not visible yet');
+              btn.disabled = false;
+              btn.textContent = prev || 'Approve';
+              return;
+            }
+          }
+
+          markAllApproved();
+          // No chrome "Approval successful" alert
         } catch (e) {
           console.error('Approve failed', e);
+          // If allowance already on-chain, still unlock Stake
+          try {
+            const ok = await waitUntilApproved(userAddress, 6_000);
+            if (ok) {
+              markAllApproved();
+              return;
+            }
+          } catch {
+            /* ignore */
+          }
           btn.disabled = false;
           btn.textContent = prev || 'Approve';
+          if (isQuietWalletCancel(e)) return;
           const msg = e?.reason || e?.data?.message || e?.message || String(e);
-          alert(
-            'Approval failed:\n\n'
-            + msg
-            + '\n\nTip: open Voodoo Wallet (red !), click Approve on the transaction, and keep the wallet unlocked.',
-          );
+          if (/timeout|timed out|geen antwoord|no response|reageert niet|insufficient funds/i.test(String(msg))) {
+            return;
+          }
+          console.warn('Approval failed:', msg);
         }
       });
     });
@@ -191,15 +341,34 @@ window.VoodooPools = (function () {
         const num = btn.id.replace('unstake', '');
         const select = document.getElementById(`unstakeSelect${num}`);
         const index = select.value;
-        if (!index) return alert('Please select a stake first');
+        if (!index) {
+          select?.focus();
+          return;
+        }
+        const prev = btn.textContent;
         try {
-          const tx = await stakingContract.unstake(index);
-          await tx.wait();
+          btn.disabled = true;
+          btn.textContent = 'Confirm…';
+          const tx = await stakingContract.unstake(index, { gasLimit: 350000 });
+          btn.textContent = 'Pending…';
+          const hash = tx?.hash || tx;
+          if (window.VoodooContracts.waitForReceipt) {
+            await window.VoodooContracts.waitForReceipt(hash, 120_000);
+          } else {
+            await Promise.race([
+              tx.wait().catch(() => null),
+              new Promise((r) => setTimeout(() => r(null), 120_000)),
+            ]);
+          }
+          btn.disabled = false;
+          btn.textContent = prev || 'Unstake';
           document.getElementById(`rewardTab${num}`).click();
-          alert('Unstake successful!');
         } catch (e) {
           console.error('Unstake failed', e);
-          alert('Unstake failed: ' + e.message);
+          btn.disabled = false;
+          btn.textContent = prev || 'Unstake';
+          if (isQuietWalletCancel(e)) return;
+          console.warn('Unstake failed:', e?.message || e);
         }
       });
     });

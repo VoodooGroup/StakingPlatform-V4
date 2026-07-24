@@ -12,7 +12,7 @@ window.VoodooPoolRenderer = (function () {
             <button id="stakeTab${n}" class="tab-btn tab-active">Stake</button>
             <button id="rewardTab${n}" class="tab-btn tab-inactive">Reward</button>
           </div>
-          <div id="stakeContent${n}" class="content active">
+          <div id="stakeContent${n}" class="content active" aria-hidden="false">
             <label class="block text-lg font-medium mb-2 text-black">Staked Token Amount</label>
             <input type="number" id="amount${n}" min="0" class="p-3 rounded bg-gray-100 text-black w-full mb-4 border border-gray-300 focus:outline-none focus:border-blue-500" />
             <div class="flex justify-between text-gray-700 mb-2">
@@ -26,16 +26,16 @@ window.VoodooPoolRenderer = (function () {
               <button id="stakeBtn${n}" disabled class="action-btn stake-btn disabled:opacity-50">Stake</button>
             </div>
           </div>
-          <div id="rewardContent${n}" class="content hidden">
+          <div id="rewardContent${n}" class="content hidden" aria-hidden="true">
             <div class="text-center">
               <span class="block text-lg font-medium text-black">Unlocks in:</span>
               <span id="timer${n}" class="timer-text font-bold">0d 0h 0m 0s</span>
             </div>
-            <select id="unstakeSelect${n}" class="w-full mb-4 p-3 rounded bg-gray-100 text-black border border-gray-300 focus:outline-none focus:border-blue-500">
+            <select id="unstakeSelect${n}" aria-label="Select stake to unstake">
               <option value="">Select a stake to unstake...</option>
             </select>
-            <button id="unstake${n}" disabled class="w-full py-3 rounded bg-blue-600 hover:bg-blue-700 text-white transition disabled:opacity-50">Unstake</button>
-            <p class="text-xs mt-4 text-center text-gray-600">
+            <button type="button" id="unstake${n}" disabled>Unstake</button>
+            <p>
               Unstaking after the specified time will also transfer generated rewards to the wallet.
             </p>
           </div>

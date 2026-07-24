@@ -63,13 +63,35 @@ window.VoodooCalculator = (function () {
       return;
     }
 
-    const years = pool.lockupDays / 365;
-    const compounded = amt * Math.pow(1 + pool.apy / 365, 365 * years);
-    const rewards = compounded - amt;
-    const usd = rewards * prices[pool.rewardToken];
+    /**
+     * Match StakingPlatformV4 on-chain math (simple interest, not compound):
+     *   rewards = amount * rewardRate * days / (365 * 100)
+     * where rewardRate is the integer APY from rewardRates() (e.g. 15 = 15% APY).
+     * pool.apy is already rate/100 (e.g. 0.15); pool.display is the % integer.
+     * Full lock period assumed (early unstake uses beforeLockTimePercentage on-chain).
+     */
+    const days = Number(pool.lockupDays) || (Number(pool.duration) / 86400) || 0;
+    const apyDecimal = Number.isFinite(pool.apy)
+      ? Number(pool.apy)
+      : (Number(pool.display) || 0) / 100;
+    const apyPercent = Number.isFinite(pool.display)
+      ? Number(pool.display)
+      : apyDecimal * 100;
+    const rewards = amt * apyDecimal * (days / 365);
+    const usd = rewards * (prices[pool.rewardToken] || 0);
 
-    document.getElementById('rewardAmount').textContent = `Rewards: ${rewards.toFixed(4)} ${pool.rewardToken}`;
-    document.getElementById('usdValue').textContent = `Value: $${usd.toFixed(2)} USD`;
+    const rewardEl = document.getElementById('rewardAmount');
+    const usdEl = document.getElementById('usdValue');
+    const apyEl = document.getElementById('usedApy');
+    if (rewardEl) {
+      rewardEl.textContent = `Rewards (full lock): ${rewards.toFixed(4)} ${pool.rewardToken}`;
+    }
+    if (usdEl) {
+      usdEl.textContent = `Est. value: $${usd.toFixed(2)} USD`;
+    }
+    if (apyEl) {
+      apyEl.textContent = `Pool APY: ${apyPercent}% · ${days} days (same rates as pool cards)`;
+    }
     resDiv.classList.remove('hidden');
     errDiv.classList.add('hidden');
   }

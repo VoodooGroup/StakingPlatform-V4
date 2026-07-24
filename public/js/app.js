@@ -2,8 +2,6 @@
   const cfg = window.VoodooConfig;
   let signer, vdoContract, stakingContract, userAddress, currentPools;
 
-  const readStakingContract = () => window.VoodooContracts.readStaking();
-
   function getContracts() {
     return { signer, vdoContract, stakingContract, userAddress };
   }
@@ -19,11 +17,16 @@
     btn.textContent = label;
   }
 
-  /** Voodoo button label: ONLY "Voodoo Wallet" or "Connected" (never address/status tips). */
-  function setVoodooBtnLabel(connected) {
+  /**
+   * Voodoo button label:
+   * - not connected → "Voodoo Wallet"
+   * - connected → short address e.g. 0x20x0...7b4d (same style as MetaMask)
+   * Never use intermediate status text (zoeken / connecting / etc.).
+   */
+  function setVoodooBtnLabel(address) {
     const voodooBtn = document.getElementById('voodooWalletBtn');
     if (!voodooBtn) return;
-    voodooBtn.textContent = connected ? 'Connected' : 'Voodoo Wallet';
+    voodooBtn.textContent = address ? shortAddress(address) : 'Voodoo Wallet';
   }
 
   function resetConnectButtons() {
@@ -40,7 +43,7 @@
     if (voodooBtn) {
       voodooBtn.disabled = false;
       voodooBtn.classList.remove('is-connected');
-      setVoodooBtnLabel(false);
+      setVoodooBtnLabel(null);
       voodooBtn.title = 'Connect with Voodoo Wallet browser extension';
     }
   }
@@ -54,7 +57,7 @@
       if (voodooBtn) {
         voodooBtn.disabled = false;
         voodooBtn.classList.add('is-connected');
-        setVoodooBtnLabel(true);
+        setVoodooBtnLabel(address);
         voodooBtn.title = address
           ? `Connected with Voodoo Wallet: ${address}`
           : 'Connected with Voodoo Wallet';
@@ -77,22 +80,35 @@
     if (voodooBtn) {
       voodooBtn.disabled = true;
       voodooBtn.classList.remove('is-connected');
-      setVoodooBtnLabel(false);
+      setVoodooBtnLabel(null);
       voodooBtn.title = 'Already connected with another wallet';
     }
   }
 
   async function updateAllAPYs() {
-    const contract = stakingContract || readStakingContract();
+    // Always public RPC + failover — never wallet eth_call.
+    // If refresh fails while Approve is open / idle, KEEP last good rates
+    // (never paint "Error" on all 6 boxes).
     try {
-      currentPools = await window.VoodooApy.fetchPools(contract);
+      currentPools = await window.VoodooApy.fetchPools();
       window.VoodooApy.renderRoi(currentPools);
       if (!document.getElementById('calculatorModal').classList.contains('hidden')) {
         window.VoodooCalculator.updateSelect(currentPools);
       }
     } catch (e) {
       console.warn('Failed to load APY', e);
-      document.querySelectorAll('[id^="roi"]').forEach((el) => { el.textContent = 'Error'; });
+      const cached = window.VoodooApy.getLastGood?.() || currentPools;
+      if (cached?.length) {
+        currentPools = cached;
+        window.VoodooApy.renderRoi(cached);
+        return;
+      }
+      // Only first-load hard failure
+      document.querySelectorAll('[id^="roi"]').forEach((el) => {
+        if (!el.textContent || el.textContent === 'Loading...') {
+          el.textContent = '—';
+        }
+      });
     }
   }
 
@@ -126,11 +142,15 @@
       () => window.location.reload(),
     );
 
-    // Non-fatal follow-up work — must not surface as "connection failed"
-    try {
-      await updateAllAPYs();
-    } catch (e) {
-      console.warn('APY refresh after connect failed', e);
+    // Non-fatal follow-up — never touch connection UI on failure.
+    // Skip APY re-fetch if we already have good rates (avoids flash/Error while
+    // user immediately clicks Approve after connect).
+    if (!currentPools?.length && !window.VoodooApy.getLastGood?.()?.length) {
+      try {
+        await updateAllAPYs();
+      } catch (e) {
+        console.warn('APY refresh after connect failed', e);
+      }
     }
 
     try {
@@ -140,15 +160,18 @@
     }
 
     try {
-      // Use public RPC for view calls (more reliable than routing allowance through the wallet)
-      const readVdo = new ethers.Contract(
-        cfg.VDO_ADDRESS,
-        cfg.TOKEN_ABI,
-        window.VoodooContracts.readProvider(),
-      );
-      const allowance = await readVdo.allowance(userAddress, cfg.STAKING_ADDRESS);
+      // Public RPC failover for allowance — spender is always StakingPlatform V4
+      const stakingAddr = window.VoodooContracts.stakingAddress?.()
+        || cfg.STAKING_ADDRESS;
+      const allowance = await window.VoodooContracts.withReadFailover(async (provider) => {
+        const readVdo = window.VoodooContracts.readVdo(provider);
+        return readVdo.allowance(userAddress, stakingAddr);
+      });
       const approved = allowance.gt(0);
-      document.querySelectorAll('[id^="approve"]').forEach((b) => { b.disabled = approved; });
+      document.querySelectorAll('[id^="approve"]').forEach((b) => {
+        b.disabled = approved;
+        if (approved) b.textContent = 'Approved';
+      });
       document.querySelectorAll('[id^="stakeBtn"]').forEach((b) => { b.disabled = !approved; });
     } catch (e) {
       console.warn('Allowance check failed after connect', e);
@@ -206,12 +229,12 @@
       if (userAddress && window.VoodooWallet.getActiveWalletKind() === 'voodoo') return;
       btn.disabled = true;
       // Label stays "Voodoo Wallet" while connecting (no intermediate texts)
-      setVoodooBtnLabel(false);
+      setVoodooBtnLabel(null);
 
       try {
         const result = await window.VoodooWallet.connectVoodoo();
         await onWalletConnected(result);
-        // markConnectedUi sets text to "Connected"
+        // markConnectedUi sets short address on the button
       } catch (err) {
         console.error('[Voodoo Wallet connect]', err);
         let extra = '';
@@ -228,7 +251,7 @@
           + `\n\ncode=${err?.code || '?'} bridgeReady=${Boolean(window.__VOODOO_BRIDGE_READY__)}`
           + `\nvoodooEth=${Boolean(window.voodooEthereum)}`;
         resetWalletUi();
-        setVoodooBtnLabel(false);
+        setVoodooBtnLabel(null);
 
         let box = document.getElementById('voodooConnectError');
         if (!box) {
@@ -271,17 +294,10 @@
 
     await updateAllAPYs();
 
-    // Auto-reconnect only for a previously selected generic injected wallet with an active account
-    try {
-      const voodoo = await window.VoodooWallet.getVoodooWalletProvider();
-      if (voodoo?.selectedAddress) {
-        document.getElementById('voodooWalletBtn')?.click();
-      } else if (window.VoodooWallet.getMetaMaskProvider()?.selectedAddress) {
-        document.getElementById('connectBtn')?.click();
-      }
-    } catch {
-      /* ignore auto-connect failures */
-    }
+    // Do NOT auto-connect on page load.
+    // Auto-clicking MetaMask/Voodoo when selectedAddress is set opened MetaMask
+    // unexpectedly whenever the staking page loaded.
+    // User must click "Voodoo Wallet" or "MetaMask" themselves.
   }
 
   document.addEventListener('contextmenu', (e) => e.preventDefault());

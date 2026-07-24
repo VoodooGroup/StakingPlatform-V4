@@ -16,7 +16,7 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/staking.css" />
+  <link rel="stylesheet" href="/css/staking.css?v=21" />
 </head>
 <body class="flex flex-col">
 
@@ -61,7 +61,7 @@
 
   <footer class="bg-black text-white py-3 mt-auto">
     <div class="px-5 flex flex-col md:flex-row justify-between items-center">
-      <p id="footerCopyright" data-sp4="footerText" class="text-sm order-1 md:order-1">&copy; 2026 Voodoo Token &bull; All rights reserved</p>
+      <p id="footerCopyright" data-sp4="footerText" class="text-sm order-1 md:order-1">&copy; 2026 VoodooGroup &bull; All rights reserved</p>
       <div class="flex space-x-6 order-2 md:order-2">
         <a href="https://x.com/Voodoo_Token/" target="_blank" class="transition"><i class="fa fa-twitter"></i></a>
         <a href="https://t.me/+oBoh-NebaWcxMDQ0" target="_blank" class="transition"><i class="fa fa-telegram"></i></a>
@@ -90,30 +90,31 @@
           <button onclick="calculateRewards()" class="w-full bg-black text-white py-2 px-4 rounded-md hover:bg-gray-900">Calculate</button>
         </div>
         <div id="result" class="mt-6 hidden">
-          <h2 class="text-lg font-semibold">Results</h2>
+          <h2 class="text-lg font-semibold text-white">Results</h2>
+          <p id="usedApy" class="text-gray-300 text-sm mb-1"></p>
           <p id="rewardAmount" class="text-gray-200"></p>
           <p id="usdValue" class="text-gray-200"></p>
         </div>
         <p id="error" class="mt-4 text-red-400 hidden"></p>
         <div class="mt-8 text-sm text-gray-400">
           <h2 class="text-lg font-semibold mb-2 text-white">About this Tool</h2>
-          <p>APY values are loaded live from the StakingPlatformV4 smart contract.</p>
+          <p>APY values are loaded live from the StakingPlatformV4 smart contract (same rates as the pool cards).</p>
         </div>
       </div>
     </div>
   </div>
 
-  <script src="/js/config.js?v=14"></script>
-  <script src="/js/StakingPlatformV4.js?v=14"></script>
-  <script src="/js/stakingAbi.js?v=14"></script>
-  <script src="/js/contracts.js?v=14"></script>
-  <script src="/js/wallet.js?v=14"></script>
-  <script src="/js/apy.js?v=14"></script>
-  <script src="/js/calculator.js?v=14"></script>
-  <script src="/js/pools.js?v=14"></script>
-  <script src="/js/poolRenderer.js?v=14"></script>
-  <script src="/js/activeSince.js?v=14"></script>
-  <script src="/js/app.js?v=15"></script>
+  <script src="/js/config.js?v=26"></script>
+  <script src="/js/StakingPlatformV4.js?v=26"></script>
+  <script src="/js/stakingAbi.js?v=27"></script>
+  <script src="/js/contracts.js?v=26"></script>
+  <script src="/js/wallet.js?v=26"></script>
+  <script src="/js/apy.js?v=26"></script>
+  <script src="/js/calculator.js?v=26"></script>
+  <script src="/js/pools.js?v=26"></script>
+  <script src="/js/poolRenderer.js?v=26"></script>
+  <script src="/js/activeSince.js?v=26"></script>
+  <script src="/js/app.js?v=26"></script>
   <script>
     (function () {
       var modal = document.getElementById('calculatorModal');

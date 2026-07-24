@@ -1,11 +1,21 @@
+function shortAddress(addr) {
+  if (!addr) return '';
+  return `${addr.slice(0, 6)}...${addr.slice(-4)}`;
+}
+
 export default function Header({
   onConnect,
   onConnectVoodoo,
   isConnected,
   walletKind,
+  address = '',
 }) {
-  const voodooLabel = walletKind === 'voodoo' && isConnected ? 'Connected' : 'Voodoo Wallet';
-  const injectedLabel = walletKind === 'injected' && isConnected ? 'Connected' : 'MetaMask';
+  const voodooLabel = walletKind === 'voodoo' && isConnected && address
+    ? shortAddress(address)
+    : 'Voodoo Wallet';
+  const injectedLabel = walletKind === 'injected' && isConnected && address
+    ? shortAddress(address)
+    : 'MetaMask';
 
   return (
     <nav className="flex items-center justify-between p-4 shadow-md bg-white">

@@ -6,7 +6,24 @@ window.StakingPlatformV4 = (function () {
     const v = window.VoodooConfig?.ASSET_VERSION || Date.now();
     const res = await fetch(`/data/StakingPlatformV4.json?v=${v}`);
     map = await res.json();
+    // Single source of truth for the staking contract — always through V4 guard
+    if (map?.contract && window.VoodooConfig?.applyPlatformContract) {
+      window.VoodooConfig.applyPlatformContract(map.contract);
+    } else if (map?.contract && window.VoodooConfig) {
+      window.VoodooConfig.STAKING_ADDRESS = map.contract;
+    }
+    // Ensure JSON never reintroduces legacy V2 if someone reverts the file
+    if (window.VoodooAddresses?.STAKING_V4) {
+      map.contract = window.VoodooConfig.STAKING_ADDRESS;
+    }
     return map;
+  }
+
+  function getContractAddress() {
+    return window.VoodooConfig?.STAKING_ADDRESS
+      || window.VoodooAddresses?.STAKING_V4
+      || map?.contract
+      || '0x3359EcA752F8fCa2A1E47EF01160CFCd782BD6E7';
   }
 
   function getAsset(key) {
@@ -89,5 +106,15 @@ window.StakingPlatformV4 = (function () {
     });
   }
 
-  return { load, getAsset, getVoodooLogoUrl, getPools, applyPageAssets, applyFavicons, applyFooterText, applyDisplayName };
+  return {
+    load,
+    getAsset,
+    getVoodooLogoUrl,
+    getPools,
+    getContractAddress,
+    applyPageAssets,
+    applyFavicons,
+    applyFooterText,
+    applyDisplayName,
+  };
 })();

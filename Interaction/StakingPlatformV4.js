@@ -3,7 +3,7 @@ import constants from '../Contract_Files/constants.js';
 export const StakingPlatformV4 = {
   name: 'StakingPlatformV4',
   displayName: 'Voodoo Staking Portal',
-  footerText: '© 2026 Voodoo Token • All rights reserved',
+  footerText: '© 2026 VoodooGroup • All rights reserved',
   contract: constants.STAKING_ADDRESS,
   assets: {
     magicLogo: '/Magic-Reward-Token-Logo.png',

@@ -72,34 +72,226 @@ img[src*="Logo"] {
   padding: 2.5rem 5rem;
   box-shadow: 0 10px 25px rgba(0,0,0,0.15);
   min-height: 382px !important;
+  height: 382px;
+  max-height: 382px;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
+  overflow: hidden;
 }
-.tab-container { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; }
+.tab-container { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-shrink: 0; }
 .tab-btn {
-  flex: 1;
-  padding: 0.75rem 1rem;
+  flex: 1 1 0;
+  min-width: 0;
+  padding: 0.75rem 0.5rem;
   font-weight: 600;
   border-radius: 8px;
-  transition: all 0.3s ease;
+  transition: background-color 0.2s ease, color 0.2s ease;
   text-align: center;
+  white-space: nowrap;
+  box-sizing: border-box;
 }
 .tab-active { background: #2563eb; color: white; }
 .tab-inactive { background: #1f2937; color: white; }
-.btn-row { display: flex; gap: 1rem; }
+/* Fixed button row — busy labels must NEVER resize the card */
+.btn-row {
+  display: flex;
+  gap: 0.75rem;
+  flex-shrink: 0;
+  align-items: stretch;
+  width: 100%;
+}
 .action-btn {
-  flex: 1;
-  padding: 0.75rem;
+  flex: 1 1 0;
+  min-width: 0;
+  width: 0; /* equal columns; label cannot grow the button */
+  height: 2.75rem;
+  min-height: 2.75rem;
+  max-height: 2.75rem;
+  padding: 0 0.4rem;
+  border: none;
   border-radius: 8px;
+  font-size: 0.8125rem;
   font-weight: 600;
-  transition: all 0.3s ease;
+  line-height: 1;
+  transition: background-color 0.2s ease, opacity 0.2s ease;
   color: white;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  box-sizing: border-box;
+  cursor: pointer;
+}
+.action-btn:disabled {
+  opacity: 0.55;
+  cursor: default;
 }
 .approve-btn { background: #1e40af; }
-.approve-btn:hover { background: #1e3a8a; }
+.approve-btn:hover:not(:disabled) { background: #1e3a8a; }
 .stake-btn { background: #2563eb; }
-.stake-btn:hover { background: #1d4ed8; }
-.pool-wrapper .content { width: 224px !important; }
+.stake-btn:hover:not(:disabled) { background: #1d4ed8; }
+/*
+ * Stake / Reward panels share .content
+ * IMPORTANT: never set display:flex on .content without guarding .hidden —
+ * that overrode Tailwind .hidden and left the Reward unstake <select>
+ * always visible (“random dropdown”) on the Stake tab.
+ */
+.pool-wrapper .content {
+  width: 224px !important;
+  max-width: 224px !important;
+  box-sizing: border-box;
+  flex: 1 1 auto;
+  min-height: 0;
+  flex-direction: column;
+}
+
+/* Only show the active panel */
+.pool-wrapper .content:not(.hidden) {
+  display: flex;
+}
+
+.pool-wrapper .content.hidden {
+  display: none !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+  height: 0 !important;
+  overflow: hidden !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+}
+
+.pool-wrapper .content > .btn-row {
+  margin-top: auto;
+}
+
+/* Reward tab: unstake select + button must fit fixed card height */
+.pool-wrapper .content[id^="rewardContent"] {
+  justify-content: flex-start;
+  gap: 0.5rem;
+}
+
+.pool-wrapper .content[id^="rewardContent"] .timer-text {
+  display: block;
+  color: #111827;
+  font-size: 1.125rem;
+  margin: 0.25rem 0 0.75rem;
+}
+
+.pool-wrapper select[id^="unstakeSelect"] {
+  display: block;
+  width: 100%;
+  max-width: 100%;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  max-height: 2.75rem;
+  margin: 0 0 0.75rem;
+  padding: 0 0.75rem;
+  border-radius: 8px;
+  border: 1px solid #d1d5db;
+  background: #f3f4f6;
+  color: #111827;
+  font-size: 0.8125rem;
+  line-height: 1.2;
+  box-sizing: border-box;
+  appearance: auto;
+  -webkit-appearance: menulist;
+  cursor: pointer;
+}
+
+.pool-wrapper button[id^="unstake"] {
+  display: block;
+  width: 100%;
+  height: 2.75rem;
+  min-height: 2.75rem;
+  max-height: 2.75rem;
+  margin: 0;
+  padding: 0 0.75rem;
+  border: none;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  font-weight: 600;
+  font-size: 0.875rem;
+  line-height: 1;
+  cursor: pointer;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.pool-wrapper button[id^="unstake"]:hover:not(:disabled) {
+  background: #1d4ed8;
+}
+
+.pool-wrapper button[id^="unstake"]:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.pool-wrapper .content[id^="rewardContent"] > p {
+  margin: 0.5rem 0 0;
+  font-size: 0.7rem;
+  line-height: 1.3;
+  color: #4b5563;
+  flex-shrink: 1;
+  overflow: hidden;
+}
+
+/* ROI line: fixed one-line height so rates never jump layout */
+.pool-wrapper [id^="roi"] {
+  display: inline-block;
+  min-width: 5.5rem;
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Calculator pool dropdown — styled, no layout spill */
+#calculatorModal select#poolSelect {
+  display: block;
+  width: 100%;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.375rem;
+  border: 1px solid #4b5563;
+  background: #374151;
+  color: #fff;
+  font-size: 0.875rem;
+  box-sizing: border-box;
+  appearance: auto;
+  -webkit-appearance: menulist;
+}
+
+#calculatorModal input#voodooAmount {
+  box-sizing: border-box;
+  min-height: 2.5rem;
+  padding: 0.5rem 0.75rem;
+  color: #fff;
+}
+
+/* Allow text selection only in inputs/selects (global * disables it) */
+input,
+select,
+textarea,
+option {
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+/* Soft highlight when Stake clicked without amount (no chrome alert) */
+.pool-wrapper input.amount-needs-value,
+.pool-wrapper input#amount1.amount-needs-value,
+input.amount-needs-value {
+  outline: 2px solid #2563eb !important;
+  border-color: #2563eb !important;
+  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25);
+  animation: amount-pulse 0.45s ease 2;
+}
+
+@keyframes amount-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.02); }
+}
 footer p { font-size: 20px !important; }
 footer a { font-size: 30px !important; }
 #connectBtn,
