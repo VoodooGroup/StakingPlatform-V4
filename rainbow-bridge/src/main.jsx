@@ -11,16 +11,31 @@ function mount() {
     document.body.appendChild(el);
   }
 
-  // Placeholder API until React hydrates
   window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
     ready: false,
     openConnectModal() {
       console.warn('[VoodooRainbow] still loading…');
+      return false;
+    },
+    openWalletConnect() {
+      return Promise.reject(new Error('WalletConnect is still loading…'));
     },
   });
 
-  // No StrictMode — double-mount confuses wallet connect state (stuck on Rabby/Frame, etc.)
-  createRoot(el).render(<App />);
+  try {
+    createRoot(el).render(<App />);
+    console.info('[VoodooRainbow] React mounted');
+  } catch (err) {
+    console.error('[VoodooRainbow] mount failed', err);
+    window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
+      ready: false,
+      error: String(err?.message || err),
+      openConnectModal() {
+        console.error('[VoodooRainbow] dead:', err);
+        return false;
+      },
+    });
+  }
 }
 
 if (document.readyState === 'loading') {

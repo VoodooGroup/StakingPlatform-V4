@@ -10,3 +10,7 @@ rainbow-bridge/node_modules
 rainbow-bridge/dist
 rainbow-bridge/.env
 rainbow-bridge/build.log
+appkit-bridge/node_modules
+appkit-bridge/dist
+appkit-bridge/.env
+appkit-bridge/build.log

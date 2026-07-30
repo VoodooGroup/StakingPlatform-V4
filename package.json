@@ -5,9 +5,10 @@
   "scripts": {
     "serve": "powershell -NoProfile -ExecutionPolicy Bypass -File serve.ps1",
     "dev": "next dev",
-    "build": "npm run build:rainbow",
+    "build": "npm run build:appkit",
+    "build:appkit": "npm --prefix appkit-bridge install && npm --prefix appkit-bridge run build",
     "build:rainbow": "npm --prefix rainbow-bridge install && npm --prefix rainbow-bridge run build",
-    "vercel-build": "npm run build:rainbow",
+    "vercel-build": "npm run build:appkit",
     "start": "next start",
     "lint": "next lint"
   },

@@ -301,8 +301,7 @@ input.amount-needs-value {
 footer p { font-size: 20px !important; }
 footer a { font-size: 30px !important; }
 #connectBtn,
-#voodooWalletBtn,
-#walletConnectBtn { cursor: pointer; }
+#voodooWalletBtn { cursor: pointer; }
 #openCalculator { cursor: pointer; }
 
 .wallet-actions {
@@ -373,7 +372,8 @@ footer a { font-size: 30px !important; }
   background: #2563eb;
 }
 
-/* RainbowKit mount only — do NOT restyle [data-rk] internals (breaks wallet steps) */
+/* AppKit / RainbowKit mount */
+#appkit-root,
 #rainbowkit-root {
   position: fixed;
   width: 0;
@@ -383,29 +383,21 @@ footer a { font-size: 30px !important; }
   pointer-events: none;
 }
 
-/*
- * body { color: white } would paint RainbowKit light modal white-on-white.
- * Isolate RK portals completely from dapp chrome styles.
- */
+/* Reown AppKit / w3m overlays above dapp */
+w3m-modal,
+wcm-modal,
+[data-rk],
 body > [data-rk] {
   z-index: 2147483000 !important;
   color: #1a1b1f !important;
   pointer-events: auto !important;
-  font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif !important;
 }
 
 body > [data-rk] button,
-body > [data-rk] a,
-body > [data-rk] [role="button"],
-body > [data-rk] [role="dialog"] {
+w3m-modal button {
   user-select: text !important;
-  -webkit-user-select: text !important;
   pointer-events: auto !important;
   cursor: pointer;
-}
-
-/* Tailwind CDN preflight can zero button backgrounds — keep RK controls clickable */
-body > [data-rk] button {
   font: inherit;
 }
 

@@ -1,22 +1,19 @@
-import EthereumProvider from '@walletconnect/ethereum-provider';
-import {
+/**
+ * Standalone WalletConnect — loaded only when the user clicks the button.
+ * Dynamic import so a WC package error cannot crash RainbowKit on page load.
+ */
+
+/** @type {any} */
+let activeProvider = null;
+
+export async function connectWalletConnectStandalone({
   projectId,
   appName,
   appDescription,
   appUrl,
   appIcon,
-  pulseChain,
-} from './config.js';
-
-/** @type {import('@walletconnect/ethereum-provider').default | null} */
-let activeProvider = null;
-
-/**
- * Standalone WalletConnect (own QR modal — does NOT use RainbowKit connect state).
- * This prevents WC from locking the RainbowKit "Other" modal.
- */
-export async function connectWalletConnectStandalone() {
-  // Drop previous WC session if any
+  chainId = 369,
+}) {
   try {
     if (activeProvider) {
       await activeProvider.disconnect();
@@ -26,17 +23,23 @@ export async function connectWalletConnectStandalone() {
   }
   activeProvider = null;
 
+  // Dynamic import — keeps initial page load stable
+  const mod = await import('@walletconnect/ethereum-provider');
+  const EthereumProvider = mod.default || mod.EthereumProvider;
+  if (!EthereumProvider?.init) {
+    throw new Error('WalletConnect library failed to load.');
+  }
+
   const provider = await EthereumProvider.init({
     projectId,
-    // PulseChain primary; mainnet optional for broader mobile wallet support
-    chains: [pulseChain.id],
-    optionalChains: [1, pulseChain.id],
+    chains: [chainId],
+    optionalChains: [1, chainId],
     showQrModal: true,
     metadata: {
-      name: appName,
-      description: appDescription,
-      url: appUrl,
-      icons: [appIcon],
+      name: appName || 'Voodoo Staking Portal',
+      description: appDescription || 'Stake VDO on PulseChain',
+      url: appUrl || 'https://voodootoken.com',
+      icons: [appIcon || 'https://voodootoken.com/Voodoo-Token-Logo.png'],
     },
   });
 
@@ -61,15 +64,7 @@ export async function connectWalletConnectStandalone() {
     window.VoodooRainbow.lastConnectorId = 'walletConnect-standalone';
   }
   window.dispatchEvent(new CustomEvent('voodoo:rainbow-connected', { detail }));
-  if (typeof window.VoodooRainbow?._onConnected === 'function') {
-    try {
-      window.VoodooRainbow._onConnected(detail);
-    } catch {
-      /* ignore */
-    }
-  }
 
-  // Clean up on session delete
   try {
     provider.on('disconnect', () => {
       activeProvider = null;
@@ -84,15 +79,9 @@ export async function connectWalletConnectStandalone() {
 
 export async function disconnectWalletConnectStandalone() {
   try {
-    if (activeProvider) {
-      await activeProvider.disconnect();
-    }
+    if (activeProvider) await activeProvider.disconnect();
   } catch {
     /* ignore */
   }
   activeProvider = null;
-}
-
-export function getStandaloneWcProvider() {
-  return activeProvider;
 }

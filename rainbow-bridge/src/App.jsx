@@ -11,11 +11,15 @@ import {
   useAccount,
   useSwitchChain,
 } from 'wagmi';
-import { config, pulseChain, projectId } from './config';
 import {
-  connectWalletConnectStandalone,
-  disconnectWalletConnectStandalone,
-} from './walletConnectStandalone.js';
+  config,
+  pulseChain,
+  projectId,
+  appName,
+  appDescription,
+  appUrl,
+  appIcon,
+} from './config';
 
 const queryClient = new QueryClient();
 
@@ -41,37 +45,6 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-function clearWcStorage() {
-  try {
-    const kill = [];
-    for (let i = 0; i < localStorage.length; i++) {
-      const k = localStorage.key(i);
-      if (!k) continue;
-      const low = k.toLowerCase();
-      if (
-        low.includes('walletconnect')
-        || low.includes('wagmi')
-        || low.includes('wc@')
-        || low.includes('reown')
-        || low.includes('@w3m')
-        || low.includes('clientone')
-        || low.includes('clienttwo')
-      ) {
-        kill.push(k);
-      }
-    }
-    kill.forEach((k) => {
-      try {
-        localStorage.removeItem(k);
-      } catch {
-        /* ignore */
-      }
-    });
-  } catch {
-    /* ignore */
-  }
-}
-
 async function killWagmiSessions() {
   try {
     for (const c of getConnections(config)) {
@@ -89,14 +62,9 @@ async function killWagmiSessions() {
   } catch {
     /* ignore */
   }
-  clearWcStorage();
-  await sleep(100);
+  await sleep(80);
 }
 
-/**
- * RainbowKit = browser wallets only (MetaMask, Rabby, Trust, …).
- * WalletConnect = separate standalone QR (never touches RK modal state).
- */
 function RainbowBridgeInner() {
   const { address, isConnected, connector, status } = useAccount();
   const { switchChainAsync } = useSwitchChain();
@@ -105,7 +73,6 @@ function RainbowBridgeInner() {
   const openAccountFn = useRef(null);
   const connectBtnRef = useRef(null);
 
-  // Injected wallets via RainbowKit → notify static dapp
   useEffect(() => {
     let cancelled = false;
     async function sync() {
@@ -127,6 +94,9 @@ function RainbowBridgeInner() {
         }
         if (!eip1193 || cancelled) return;
         lastEmitted.current = key;
+        if (window.VoodooRainbow) {
+          window.VoodooRainbow.lastConnectorId = connector.id || 'rainbowkit';
+        }
         const detail = {
           provider: eip1193,
           address,
@@ -134,17 +104,7 @@ function RainbowBridgeInner() {
           connectorName: connector.name || 'Wallet',
           walletKind: 'rainbow',
         };
-        if (window.VoodooRainbow) {
-          window.VoodooRainbow.lastConnectorId = connector.id || 'rainbowkit';
-        }
         window.dispatchEvent(new CustomEvent('voodoo:rainbow-connected', { detail }));
-        if (typeof window.VoodooRainbow?._onConnected === 'function') {
-          try {
-            window.VoodooRainbow._onConnected(detail);
-          } catch {
-            /* ignore */
-          }
-        }
         if (switchChainAsync) {
           Promise.race([
             switchChainAsync({ chainId: pulseChain.id }),
@@ -163,14 +123,17 @@ function RainbowBridgeInner() {
 
   const hardReset = useCallback(async () => {
     lastEmitted.current = '';
-    await disconnectWalletConnectStandalone().catch(() => {});
+    try {
+      const { disconnectWalletConnectStandalone } = await import('./walletConnectStandalone.js');
+      await disconnectWalletConnectStandalone();
+    } catch {
+      /* ignore */
+    }
     await killWagmiSessions();
   }, []);
 
-  /** Open RainbowKit wallet list (browser wallets). Never used for WalletConnect. */
   const openRainbowKit = useCallback(async () => {
     try {
-      // If a previous injected session is active, disconnect so connect modal works
       if (getAccount(config).isConnected) {
         await killWagmiSessions();
         for (let i = 0; i < 40; i++) {
@@ -178,7 +141,6 @@ function RainbowBridgeInner() {
           if (!getAccount(config).isConnected && typeof openConnectFn.current === 'function') break;
         }
       }
-
       if (typeof openConnectFn.current === 'function') {
         openConnectFn.current();
         return true;
@@ -203,19 +165,17 @@ function RainbowBridgeInner() {
     return openRainbowKit();
   }, [openRainbowKit]);
 
-  /** Standalone WalletConnect QR — does not open/close RainbowKit */
   const openWalletConnect = useCallback(async () => {
-    try {
-      // Keep RainbowKit clean
-      await killWagmiSessions();
-      const detail = await connectWalletConnectStandalone();
-      return detail;
-    } catch (err) {
-      // User closed QR or connection failed — leave RK usable
-      console.warn('[VoodooRainbow] WalletConnect standalone', err?.message || err);
-      await disconnectWalletConnectStandalone().catch(() => {});
-      throw err;
-    }
+    await killWagmiSessions();
+    const { connectWalletConnectStandalone } = await import('./walletConnectStandalone.js');
+    return connectWalletConnectStandalone({
+      projectId,
+      appName,
+      appDescription,
+      appUrl,
+      appIcon,
+      chainId: pulseChain.id,
+    });
   }, []);
 
   useEffect(() => {
@@ -224,15 +184,11 @@ function RainbowBridgeInner() {
       projectId,
       status,
       wagmiConnected: Boolean(isConnected && address),
-      /** Open browser-wallet modal (Other button) */
       openConnectModal: async (opts = {}) => {
-        if (opts.mode === 'account' && isConnected && address) {
-          return openAccount();
-        }
+        if (opts.mode === 'account' && isConnected && address) return openAccount();
         return openRainbowKit();
       },
       openAccountModal: openAccount,
-      /** Standalone WalletConnect QR (WalletConnect button) */
       openWalletConnect,
       hardReset,
       disconnect: hardReset,
@@ -255,7 +211,6 @@ function RainbowBridgeInner() {
   return (
     <div
       id="voodoo-rk-connect-host"
-      aria-hidden="true"
       style={{
         position: 'fixed',
         width: 1,
@@ -272,7 +227,6 @@ function RainbowBridgeInner() {
           openConnectFn.current = typeof openConnectModal === 'function' ? openConnectModal : null;
           openAccountFn.current = typeof openAccountModal === 'function' ? openAccountModal : null;
           const connected = Boolean(mounted && account && chain);
-
           return (
             <div style={{ pointerEvents: 'auto' }}>
               <button
