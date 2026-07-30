@@ -1,4 +1,4 @@
-import { connectorsForWallets } from '@rainbow-me/rainbowkit';
+import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
   metaMaskWallet,
   walletConnectWallet,
@@ -16,20 +16,14 @@ import {
   frameWallet,
   tokenPocketWallet,
 } from '@rainbow-me/rainbowkit/wallets';
-import { createConfig, http } from 'wagmi';
+import { http } from 'wagmi';
 import { mainnet, pulsechain } from 'viem/chains';
 import { voodooWallet } from './voodooWallet.js';
 import { pulseWallet } from './pulseWallets.js';
 
 /**
- * WalletConnect Cloud / Reown project id (required for WalletConnect QR).
- *
- * Priority:
- * 1. VITE_WC_PROJECT_ID at build time (rainbow-bridge/.env)
- * 2. window.VoodooConfig.WC_PROJECT_ID (set in public/js/config.js)
- * 3. RainbowKit documented example id (works for local/dev testing)
- *
- * Production: create a free id at https://cloud.reown.com and set it.
+ * WalletConnect / Reown Cloud project id.
+ * https://cloud.reown.com — set VITE_WC_PROJECT_ID for production.
  */
 function resolveProjectId() {
   try {
@@ -46,7 +40,7 @@ function resolveProjectId() {
   } catch {
     /* ignore */
   }
-  // Official RainbowKit fallback example project id (NOT our old wrong id)
+  // RainbowKit docs example project id
   return '21fef48091f12692cad574a6f7753643';
 }
 
@@ -67,16 +61,15 @@ export const pulseChain = {
 
 const appName = 'Voodoo Staking Portal';
 const appDescription = 'Stake VDO on PulseChain — VoodooGroup';
-/** Prefer production HTTPS URL in WC metadata (mobile wallets reject some localhost icons) */
 const appUrl = 'https://voodootoken.com';
 const appIcon = 'https://voodootoken.com/Voodoo-Token-Logo.png';
 
 /**
  * PulseChain-capable wallets.
- * pulseWallet() strips hanging QR getUri on extension wallets (Rabby→Trust fix).
- * walletConnectWallet is NOT wrapped — needs getUri for the QR screen.
+ * pulseWallet() strips hanging QR getUri on extension wallets.
+ * walletConnectWallet is NOT wrapped — needs getUri for the in-modal QR.
  */
-const walletGroups = [
+const wallets = [
   {
     groupName: 'PulseChain wallets',
     wallets: [
@@ -106,19 +99,25 @@ const walletGroups = [
 ];
 
 /**
- * CRITICAL for WalletConnect:
- * - appName / appUrl / appIcon must be passed here (builds WC metadata)
- * - do NOT set showQrModal: true (RainbowKit forces false + shows its own QR)
- * - projectId must be a valid Reown Cloud id
+ * Official RainbowKit config helper — wires WalletConnect correctly
+ * (metadata, dual WC clients, showQrModal:false for in-modal QR).
  */
-const connectors = connectorsForWallets(walletGroups, {
+export const config = getDefaultConfig({
   appName,
   appDescription,
   appUrl,
   appIcon,
   projectId,
+  wallets,
+  chains: [pulseChain, mainnet],
+  transports: {
+    [pulseChain.id]: http(pulseRpc, { batch: true }),
+    [mainnet.id]: http(),
+  },
+  ssr: false,
+  multiInjectedProviderDiscovery: false,
+  // Do not pass showQrModal:true — RK must receive display_uri for its QR screen
   walletConnectParameters: {
-    // showQrModal intentionally omitted — RK sets false so display_uri reaches the modal QR
     metadata: {
       name: appName,
       description: appDescription,
@@ -128,29 +127,8 @@ const connectors = connectorsForWallets(walletGroups, {
   },
 });
 
-/**
- * PulseChain primary + Ethereum mainnet secondary.
- * WalletConnect v2 is more reliable when at least one widely-known chain
- * is registered; staking still targets PulseChain (initialChain in provider).
- */
-export const config = createConfig({
-  connectors,
-  chains: [pulseChain, mainnet],
-  transports: {
-    [pulseChain.id]: http(pulseRpc, { batch: true }),
-    [mainnet.id]: http(),
-  },
-  multiInjectedProviderDiscovery: false,
-  ssr: false,
-});
-
 export { projectId, appName };
 
 if (typeof console !== 'undefined') {
-  console.info(
-    '[VoodooRainbow] WC projectId:',
-    projectId.slice(0, 8) + '…',
-    '| app:',
-    appName,
-  );
+  console.info('[VoodooRainbow] getDefaultConfig | WC projectId:', `${projectId.slice(0, 8)}…`);
 }

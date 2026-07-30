@@ -18,7 +18,6 @@ import { config, pulseChain, projectId } from './config';
 
 const queryClient = new QueryClient();
 
-/** White modal surfaces + dim backdrop so QR / lists stay readable */
 const theme = lightTheme({
   accentColor: '#2563eb',
   accentColorForeground: '#ffffff',
@@ -66,12 +65,13 @@ function RainbowBridgeInner() {
   const { openConnectModal, connectModalOpen } = useConnectModal();
   const { openAccountModal } = useAccountModal();
   const { openChainModal } = useChainModal();
-  const { address, isConnected, status, connector } = useAccount();
+  const { address, isConnected, status, connector, isConnecting, isReconnecting } = useAccount();
   const { data: connectorClient } = useConnectorClient();
   const { disconnectAsync } = useDisconnect();
   const { switchChainAsync } = useSwitchChain();
   const lastEmitted = useRef('');
   const wasModalOpen = useRef(false);
+  const closeTimer = useRef(null);
 
   const emitConnected = useCallback(async () => {
     if (!isConnected || !address) return;
@@ -141,33 +141,70 @@ function RainbowBridgeInner() {
   }, [isConnected]);
 
   /**
-   * Close without connect → free Other button.
-   * Also abort half-open wagmi connect so the next wallet can start clean.
+   * Modal closed without a full connection.
+   *
+   * IMPORTANT: do NOT disconnect() immediately here.
+   * WalletConnect pairing can briefly report connectModalOpen=false while
+   * spinning up the QR step — disconnecting kills the session and looks like
+   * "popup closed, nothing happened", then stuck connecting blocks reopen.
+   *
+   * Only notify the dapp (so Other can be clicked again). Clear stuck
+   * connecting state on the *next open*, not on close.
    */
   useEffect(() => {
-    if (wasModalOpen.current && !connectModalOpen) {
-      if (!isConnected) {
-        disconnectAsync?.().catch(() => {});
-        lastEmitted.current = '';
-        window.dispatchEvent(new CustomEvent('voodoo:rainbow-modal-closed', {
-          detail: { reason: 'dismissed' },
-        }));
-      }
+    if (closeTimer.current) {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = null;
     }
+
+    if (wasModalOpen.current && !connectModalOpen && !isConnected) {
+      closeTimer.current = setTimeout(() => {
+        // Still closed and not connected after debounce → user really dismissed
+        if (!isConnected) {
+          window.dispatchEvent(new CustomEvent('voodoo:rainbow-modal-closed', {
+            detail: { reason: 'dismissed' },
+          }));
+        }
+      }, 500);
+    }
+
     wasModalOpen.current = Boolean(connectModalOpen);
 
     if (window.VoodooRainbow) {
       window.VoodooRainbow.connectModalOpen = Boolean(connectModalOpen);
+      window.VoodooRainbow.status = status;
     }
-  }, [connectModalOpen, isConnected, disconnectAsync]);
+
+    return () => {
+      if (closeTimer.current) {
+        clearTimeout(closeTimer.current);
+        closeTimer.current = null;
+      }
+    };
+  }, [connectModalOpen, isConnected, status]);
 
   useEffect(() => {
-    const openModalSafe = () => {
+    /**
+     * Always-safe open: clear half-open WC/injected connect first so the modal
+     * can open again after a failed WalletConnect click.
+     */
+    const openModalSafe = async () => {
       try {
-        if (isConnected) {
+        if (isConnected && address) {
           openAccountModal?.();
           return true;
         }
+
+        // Stuck "connecting" after WC failure blocks RainbowKit from reopening
+        if (isConnecting || isReconnecting || status === 'connecting' || status === 'reconnecting') {
+          try {
+            await disconnectAsync?.();
+          } catch {
+            /* ignore */
+          }
+          await new Promise((r) => setTimeout(r, 150));
+        }
+
         if (typeof openConnectModal === 'function') {
           openConnectModal();
           return true;
@@ -184,21 +221,25 @@ function RainbowBridgeInner() {
       }
     };
 
+    const hardReset = async () => {
+      lastEmitted.current = '';
+      try {
+        await disconnectAsync?.();
+      } catch {
+        /* ignore */
+      }
+    };
+
     const api = {
       ready: true,
       projectId,
       connectModalOpen: Boolean(connectModalOpen),
+      status,
       openConnectModal: openModalSafe,
       openAccountModal: () => openAccountModal?.(),
       openChainModal: () => openChainModal?.(),
-      disconnect: async () => {
-        try {
-          await disconnectAsync?.();
-        } catch {
-          /* ignore */
-        }
-        lastEmitted.current = '';
-      },
+      hardReset,
+      disconnect: hardReset,
       isConnected: () => Boolean(isConnected && address),
       getAddress: () => address || null,
       getStatus: () => status,
@@ -213,12 +254,13 @@ function RainbowBridgeInner() {
     openChainModal,
     disconnectAsync,
     isConnected,
+    isConnecting,
+    isReconnecting,
     address,
     status,
     connectModalOpen,
   ]);
 
-  // Empty host — RainbowKit portals modals to document.body on their own
   return null;
 }
 
@@ -228,8 +270,6 @@ export default function App() {
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
           theme={theme}
-          /* wide = previous side-by-side layout (list + detail).
-             Wallet switching works because pulseWallet() strips hanging QR getUri. */
           modalSize="wide"
           initialChain={pulseChain}
           showRecentTransactions={false}

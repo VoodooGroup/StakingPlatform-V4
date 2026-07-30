@@ -266,8 +266,8 @@
         return;
       }
 
-      // Keep button ENABLED so user can reopen if they closed the modal.
-      // connectOther() reuses an in-flight wait + re-opens the modal.
+      // Never leave the button disabled — WC failures must still allow reopen
+      btn.disabled = false;
       btn.textContent = 'Other';
       try {
         const result = await window.VoodooWallet.connectOther();
@@ -277,21 +277,20 @@
           || err?.code === 4001
           || err?.code === 'ACTION_REJECTED'
           || /timed out|cancelled|rejected|denied/i.test(err?.message || '');
-        // Soft cancel (closed modal) — keep UI ready for next click
+        // Soft cancel / WC dismiss — keep UI ready
         if (quiet) {
-          if (!userAddress) {
-            btn.disabled = false;
-            btn.textContent = 'Other';
-          }
-          return;
-        }
-        resetWalletUi();
-        await showConnectError('Connection failed', err);
-      } finally {
-        if (!userAddress) {
           btn.disabled = false;
           btn.textContent = 'Other';
+          return;
         }
+        // Real error — still allow reopen (do not hard-lock UI)
+        console.error('Other wallet connect error', err);
+        btn.disabled = false;
+        btn.textContent = 'Other';
+        await showConnectError('Connection failed', err);
+      } finally {
+        btn.disabled = false;
+        if (!userAddress) btn.textContent = 'Other';
       }
     });
   }
