@@ -476,6 +476,7 @@ window.VoodooWallet = (function () {
   }
 
   async function connectVoodoo(onStatus) {
+    // Only runs from the Voodoo Wallet BUTTON click (user gesture).
     const gen = ++voodooConnectGen;
     const isCurrent = () => gen === voodooConnectGen;
 
@@ -503,28 +504,8 @@ window.VoodooWallet = (function () {
     onStatus?.('opening');
     clearActiveWallet();
 
-    // Tag provider so connectWithProvider can detect superseded clicks
+    // One open per click — no wallet_requestPermissions (that re-opened randomly)
     ethereum.__voodooIsCurrent = isCurrent;
-
-    // Optional: nudge a fresh permission UI if a previous request is stuck
-    try {
-      await Promise.race([
-        ethereum.request({
-          method: 'wallet_requestPermissions',
-          params: [{ eth_accounts: {} }],
-        }),
-        new Promise((r) => setTimeout(r, 1200)),
-      ]);
-    } catch (permErr) {
-      if (permErr?.code === 4001 || /reject|denied/i.test(String(permErr?.message || ''))) {
-        throw mapRequestError(permErr, 'voodoo');
-      }
-    }
-    if (!isCurrent()) {
-      const err = new Error('restart');
-      err.code = 'ACTION_REJECTED';
-      throw err;
-    }
 
     try {
       return await connectWithProvider(ethereum, 'voodoo', onStatus);
@@ -551,102 +532,26 @@ window.VoodooWallet = (function () {
   }
 
   /**
-   * eth_requestAccounts that recovers when user CLOSES the extension
-   * without clicking Cancel/Reject (promise otherwise hangs forever).
-   * Detect: blur (popup) → focus back + still no accounts → treat as dismissed.
+   * One eth_requestAccounts per button click only.
+   * No focus/blur auto-logic (that re-opened the wallet after click-away).
+   * Newer button click supersedes this waiter without opening another popup by itself.
    */
-  function requestVoodooAccounts(ethereum, { isCurrent, timeoutMs = 90_000 } = {}) {
+  function requestVoodooAccounts(ethereum, { isCurrent, timeoutMs = 120_000 } = {}) {
     return new Promise((resolve, reject) => {
       let settled = false;
-      let sawBlur = false;
-      const started = Date.now();
-      let focusedSince = null;
 
       const finish = (ok, val) => {
         if (settled) return;
         if (typeof isCurrent === 'function' && !isCurrent()) {
           settled = true;
-          cleanup();
+          clearTimeout(hardTimer);
           return;
         }
         settled = true;
-        cleanup();
+        clearTimeout(hardTimer);
         if (ok) resolve(val);
         else reject(val);
       };
-
-      const dismissedErr = () => {
-        const err = new Error('dismissed');
-        err.code = 4001;
-        return err;
-      };
-
-      const cleanup = () => {
-        window.removeEventListener('blur', onBlur);
-        window.removeEventListener('focus', onFocus);
-        document.removeEventListener('visibilitychange', onVis);
-        clearTimeout(hardTimer);
-        clearInterval(pollTimer);
-      };
-
-      const onBlur = () => {
-        sawBlur = true;
-        focusedSince = null;
-      };
-
-      const tryDismiss = async () => {
-        if (settled) return;
-        if (typeof isCurrent === 'function' && !isCurrent()) {
-          settled = true;
-          cleanup();
-          return;
-        }
-        if (Date.now() - started < 700) return;
-        try {
-          const accs = await ethereum.request({ method: 'eth_accounts' });
-          if (accs?.length) {
-            finish(true, accs);
-            return;
-          }
-          if (sawBlur) finish(false, dismissedErr());
-        } catch {
-          if (sawBlur) finish(false, dismissedErr());
-        }
-      };
-
-      const onFocus = () => setTimeout(tryDismiss, 400);
-      const onVis = () => {
-        if (document.visibilityState === 'visible') onFocus();
-      };
-
-      window.addEventListener('blur', onBlur);
-      window.addEventListener('focus', onFocus);
-      document.addEventListener('visibilitychange', onVis);
-
-      const pollTimer = setInterval(async () => {
-        if (settled) return;
-        if (typeof isCurrent === 'function' && !isCurrent()) {
-          settled = true;
-          cleanup();
-          return;
-        }
-        const pageFocused = typeof document.hasFocus === 'function' ? document.hasFocus() : true;
-        if (pageFocused && document.visibilityState === 'visible') {
-          if (focusedSince == null) focusedSince = Date.now();
-          if (Date.now() - started > 1200 && Date.now() - focusedSince > 900) {
-            try {
-              const accs = await ethereum.request({ method: 'eth_accounts' });
-              if (accs?.length) finish(true, accs);
-              else if (sawBlur || Date.now() - started > 2500) finish(false, dismissedErr());
-            } catch {
-              if (sawBlur || Date.now() - started > 2500) finish(false, dismissedErr());
-            }
-          }
-        } else {
-          focusedSince = null;
-          sawBlur = true;
-        }
-      }, 350);
 
       const hardTimer = setTimeout(() => {
         const err = new Error(
