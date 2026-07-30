@@ -34,7 +34,6 @@ window.VoodooWallet = (function () {
       if (p && !found.includes(p)) found.push(p);
     };
 
-    // Dedicated globals from Voodoo Wallet extension (survive MetaMask overwrite)
     push(window.voodooEthereum);
     push(window.VoodooWalletProvider);
 
@@ -118,25 +117,12 @@ window.VoodooWallet = (function () {
     return listInjectedProviders().find(isVoodooProvider) || null;
   }
 
-  async function getVoodooWalletProvider(options = {}) {
-    const attempts = options.attempts ?? 10;
-    const delayMs = options.delayMs ?? 300;
-
-    for (let i = 0; i < attempts; i += 1) {
-      const sync = findVoodooSync();
-      if (sync) return sync;
-
-      const fromEip6963 = await discoverVoodooViaEip6963(i === 0 ? 700 : 400);
-      if (fromEip6963) return fromEip6963;
-
-      if (i < attempts - 1) {
-        await new Promise((r) => setTimeout(r, delayMs));
-      }
-    }
-    return null;
+  async function getVoodooWalletProvider() {
+    const sync = findVoodooSync();
+    if (sync) return sync;
+    return discoverVoodooViaEip6963(900);
   }
 
-  /** Snapshot for debugging connection problems */
   async function diagnose() {
     const eth = window.ethereum;
     return {
@@ -177,17 +163,10 @@ window.VoodooWallet = (function () {
       });
     } catch (switchErr) {
       if (switchErr?.code === 4902) {
-        try {
-          await ethereum.request({
-            method: 'wallet_addEthereumChain',
-            params: [pulsechainNetwork()],
-          });
-        } catch (addErr) {
-          if (isVoodooProvider(ethereum)) return;
-          throw addErr;
-        }
-      } else if (isVoodooProvider(ethereum)) {
-        return;
+        await ethereum.request({
+          method: 'wallet_addEthereumChain',
+          params: [pulsechainNetwork()],
+        });
       } else {
         throw switchErr;
       }
@@ -195,9 +174,8 @@ window.VoodooWallet = (function () {
   }
 
   function mapRequestError(err, kind) {
-    const msg = err?.message || String(err || 'Unknown error');
+    const msg = String(err?.message || err || '');
     const code = err?.code;
-
     if (code === 4001 || /user rejected|rejected the request/i.test(msg)) {
       return new Error('Connection was cancelled in your wallet.');
     }
@@ -247,7 +225,6 @@ window.VoodooWallet = (function () {
     let accounts;
     try {
       onStatus?.('requesting');
-      // WalletConnect / RainbowKit already authorized — prefer eth_accounts (no second prompt)
       try {
         accounts = await ethereum.request({ method: 'eth_accounts' });
       } catch {
@@ -276,17 +253,9 @@ window.VoodooWallet = (function () {
       } catch (e) {
         console.warn('Chain switch attempt:', e?.message || e);
       }
-      /**
-       * Never throw for RainbowKit / WalletConnect here.
-       * WC often lands on mainnet first; failing the chain switch used to leave
-       * wagmi "connected" while the dapp never wired up → modal closed + cannot reopen.
-       * Injected MetaMask-style still gets a soft warning only.
-       */
+      // Never throw for rainbow/WC — switch is best-effort
       if (chainId !== PULSE_CHAIN_ID && kind !== 'voodoo' && kind !== 'rainbow') {
         throw new Error('Please switch your wallet to PulseChain (chain ID 369) and try again.');
-      }
-      if (chainId !== PULSE_CHAIN_ID) {
-        console.warn('[VoodooWallet] Not on PulseChain yet (chain', chainId, ') — continuing; user can switch later.');
       }
     }
 
@@ -294,7 +263,6 @@ window.VoodooWallet = (function () {
     let signer;
     let userAddress = accounts[0];
     try {
-      // 'any' network: WalletConnect may not be on PulseChain immediately
       provider = new ethers.providers.Web3Provider(ethereum, 'any');
       if (kind === 'voodoo' || isVoodooProvider(ethereum)) {
         try {
@@ -314,7 +282,6 @@ window.VoodooWallet = (function () {
         /* use accounts[0] */
       }
     } catch (err) {
-      // Still usable with accounts[0] if ethers network detect fails
       console.warn('ethers provider setup warning', err);
       provider = new ethers.providers.Web3Provider(ethereum, {
         name: 'PulseChain',
@@ -331,7 +298,6 @@ window.VoodooWallet = (function () {
   }
 
   async function connect() {
-    // Legacy alias — "Other" now opens RainbowKit (all wallets)
     return connectOther();
   }
 
@@ -365,7 +331,6 @@ window.VoodooWallet = (function () {
     });
   }
 
-  /** In-flight RainbowKit connect */
   let pendingRainbowConnect = null;
   let pendingReject = null;
   let connectEpoch = 0;
@@ -385,15 +350,14 @@ window.VoodooWallet = (function () {
   }
 
   /**
-   * Open RainbowKit wallet modal and resolve when a wallet connects.
-   * First open: just open the list (no heavy reset).
-   * Reopen after WC: disconnect then open (openConnectModal only works when disconnected).
+   * Open RainbowKit via ConnectButton bridge.
+   * Always force-opens wallet list (disconnects first if WC left a zombie session).
    */
   async function connectOther(onStatus) {
     onStatus?.('opening');
     const rk = await waitForRainbowReady();
 
-    // Dapp already has a live rainbow session → account modal
+    // Live dapp session → account modal
     if (activeProvider && activeWalletKind === 'rainbow') {
       try {
         await rk.openConnectModal?.({ mode: 'account' });
@@ -414,14 +378,9 @@ window.VoodooWallet = (function () {
       }
     }
 
-    // Already waiting — just re-open modal (do not cancel WC QR mid-flow)
+    // Cancel stuck waiter from previous attempt so we never block Other forever
     if (pendingRainbowConnect) {
-      try {
-        await rk.openConnectModal?.({ mode: 'connect', forceConnect: false });
-      } catch {
-        /* ignore */
-      }
-      return pendingRainbowConnect;
+      cancelPendingRainbow('restart');
     }
 
     const epoch = ++connectEpoch;
@@ -437,7 +396,6 @@ window.VoodooWallet = (function () {
         if (pendingReject === reject) pendingReject = null;
         window.removeEventListener('voodoo:rainbow-connected', onConnected);
         window.removeEventListener('voodoo:rainbow-error', onError);
-        window.removeEventListener('voodoo:rainbow-modal-closed', onModalClosed);
       };
 
       const timer = setTimeout(() => {
@@ -482,36 +440,17 @@ window.VoodooWallet = (function () {
         reject(new Error(event?.detail?.message || 'Wallet connection failed.'));
       }
 
-      function onModalClosed() {
-        if (settled || epoch !== connectEpoch) return;
-        if (sawConnected || activeProvider) return;
-        // Modal may close a moment before rainbow-connected fires (WC success)
-        setTimeout(() => {
-          if (settled || epoch !== connectEpoch || sawConnected || activeProvider) return;
-          if (window.VoodooRainbow?.isConnected?.()) return;
-          cleanup();
-          const err = new Error('Connection cancelled');
-          err.code = 'ACTION_REJECTED';
-          reject(err);
-        }, 1200);
-      }
-
       window.addEventListener('voodoo:rainbow-connected', onConnected);
       window.addEventListener('voodoo:rainbow-error', onError);
-      window.addEventListener('voodoo:rainbow-modal-closed', onModalClosed);
 
-      // First open: forceConnect only if wagmi thinks it is already connected
-      const force = Boolean(rk.isConnected?.() || rk.wagmiConnected);
+      // Always open connect list (bridge disconnects zombie WC sessions first)
       Promise.resolve()
-        .then(() => rk.openConnectModal?.({
-          mode: 'connect',
-          forceConnect: force,
-        }))
+        .then(() => rk.openConnectModal?.({ mode: 'connect', forceConnect: true }))
         .then((opened) => {
           if (settled || epoch !== connectEpoch) return;
           if (opened === false) {
             cleanup();
-            reject(new Error('Could not open wallet modal. Please refresh the page (Ctrl+F5).'));
+            reject(new Error('Could not open wallet modal. Please hard-refresh (Ctrl+Shift+R).'));
           }
         })
         .catch((err) => {
@@ -533,7 +472,6 @@ window.VoodooWallet = (function () {
     onStatus?.('detecting');
     const ethereum = await getVoodooWalletProvider();
     if (!ethereum) {
-      // Production-safe message only. Diagnose stays console-only when debug is on.
       const info = await diagnose();
       if (window.VoodooDebug === true || window.VoodooUI?.isDebug?.()) {
         console.error('[Voodoo diagnose]', info);
@@ -628,6 +566,7 @@ window.VoodooWallet = (function () {
     getActiveProvider,
     getActiveWalletKind,
     clearActiveWallet,
+    cancelPendingRainbow,
     diagnose,
     VOODOO_INSTALL_URL,
   };
