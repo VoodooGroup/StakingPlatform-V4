@@ -143,9 +143,11 @@ window.VoodooPools = (function () {
       btn.addEventListener('click', async () => {
         const { stakingContract, userAddress } = getContracts();
         if (!stakingContract || !userAddress) {
-          // Soft — no chrome alert; connect button is in the header
-          console.warn('Connect Voodoo Wallet first');
           document.getElementById('voodooWalletBtn')?.focus();
+          window.VoodooUI?.info?.(
+            'Connect Voodoo Wallet or MetaMask first, then try again.',
+            { title: 'Wallet required' },
+          );
           return;
         }
         const num = btn.id.replace('stakeBtn', '');
@@ -265,8 +267,11 @@ window.VoodooPools = (function () {
       btn.addEventListener('click', async () => {
         const { vdoContract, userAddress } = getContracts();
         if (!vdoContract || !userAddress) {
-          console.warn('Connect Voodoo Wallet first');
           document.getElementById('voodooWalletBtn')?.focus();
+          window.VoodooUI?.info?.(
+            'Connect Voodoo Wallet or MetaMask first, then try again.',
+            { title: 'Wallet required' },
+          );
           return;
         }
         const stakingAddr = window.VoodooContracts.stakingAddress?.()

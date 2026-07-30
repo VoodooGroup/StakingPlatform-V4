@@ -199,16 +199,11 @@ window.VoodooWallet = (function () {
     const code = err?.code;
 
     if (code === 4001 || /user rejected|rejected the request/i.test(msg)) {
-      return new Error('Verbinding geannuleerd — je hebt het verzoek afgewezen in de wallet.');
+      return new Error('Connection was cancelled in your wallet.');
     }
-    if (code === 'VOODOO_TIMEOUT' || /geen antwoord/i.test(msg)) {
+    if (code === 'VOODOO_TIMEOUT' || /geen antwoord|no response|timed out|timeout/i.test(msg)) {
       return new Error(
-        'Geen antwoord van Voodoo Wallet.\n\n'
-        + '1. Klik het Voodoo-icoon (rode !)\n'
-        + '2. Log in\n'
-        + '3. chrome://extensions → Reload Voodoo Wallet\n'
-        + '4. Deze pagina Ctrl+F5\n'
-        + '5. Opnieuw “Voodoo Wallet” klikken',
+        'Voodoo Wallet did not respond. Open the extension, make sure you are signed in, then try again.',
       );
     }
     if (
@@ -217,15 +212,13 @@ window.VoodooWallet = (function () {
       || /wallet locked/i.test(msg)
     ) {
       return new Error(
-        'Voodoo Wallet is vergrendeld of niet klaar.\n\n'
-        + '1. Klik het Voodoo Wallet icoon in Chrome (rood ! als die er is)\n'
-        + '2. Log in met je wachtwoord\n'
-        + '3. Herlaad de extensie als het blijft falen (chrome://extensions → Reload)\n'
-        + '4. Klik opnieuw op “Voodoo Wallet” op deze pagina',
+        'Voodoo Wallet is locked. Open the extension, unlock it, then try connecting again.',
       );
     }
     if (code === 'VOODOO_NOT_FOUND' || /not detected|niet gevonden/i.test(msg)) {
-      const e = new Error(msg);
+      const e = new Error(
+        'Voodoo Wallet was not detected. Install the extension, open it and sign in, then refresh this page and try again.',
+      );
       e.code = 'VOODOO_NOT_FOUND';
       e.installUrl = VOODOO_INSTALL_URL;
       return e;
@@ -236,14 +229,14 @@ window.VoodooWallet = (function () {
   async function connectWithProvider(ethereum, kind, onStatus) {
     if (!ethereum) {
       if (window.location.protocol === 'file:') {
-        throw new Error('Open via http://localhost:8080 (extensies werken niet op file://)');
+        throw new Error('Open this site over https (or http://localhost). Browser extensions do not work on file:// pages.');
       }
       throw mapRequestError(
         Object.assign(
           new Error(
             kind === 'voodoo'
-              ? 'Voodoo Wallet niet gedetecteerd. Herlaad de extensie en deze pagina.'
-              : 'Geen browser wallet gevonden.',
+              ? 'Voodoo Wallet was not detected. Install or reload the extension, then refresh this page.'
+              : 'No browser wallet was found. Install MetaMask or another wallet and try again.',
           ),
           { code: kind === 'voodoo' ? 'VOODOO_NOT_FOUND' : undefined },
         ),
@@ -262,9 +255,7 @@ window.VoodooWallet = (function () {
 
     if (!accounts?.length) {
       throw new Error(
-        'Geen account ontvangen van Voodoo Wallet.\n\n'
-        + 'Open de extensie, log in, en probeer opnieuw.\n'
-        + 'Zorg dat je de nieuwste build geladen hebt (chrome://extensions → Reload).',
+        'No account was returned by the wallet. Open the extension, unlock it, and try again.',
       );
     }
 
@@ -278,7 +269,7 @@ window.VoodooWallet = (function () {
         console.warn('Chain switch attempt:', e?.message || e);
       }
       if (chainId !== PULSE_CHAIN_ID && kind !== 'voodoo') {
-        throw new Error('Zet je wallet op PulseChain (chain 369) en probeer opnieuw');
+        throw new Error('Please switch your wallet to PulseChain (chain ID 369) and try again.');
       }
     }
 
@@ -330,17 +321,13 @@ window.VoodooWallet = (function () {
     onStatus?.('detecting');
     const ethereum = await getVoodooWalletProvider();
     if (!ethereum) {
+      // Production-safe message only. Diagnose stays console-only when debug is on.
       const info = await diagnose();
-      console.error('[Voodoo diagnose]', info);
+      if (window.VoodooDebug === true || window.VoodooUI?.isDebug?.()) {
+        console.error('[Voodoo diagnose]', info);
+      }
       const err = new Error(
-        'Voodoo Wallet niet gevonden op deze pagina.\n\n'
-        + 'Doe dit exact:\n'
-        + '1. chrome://extensions → Load unpacked:\n'
-        + '   C:\\Users\\ReMarkt\\voodoo-pulse-extension\n'
-        + '2. Reload de extensie na elke npm run build\n'
-        + '3. Open Voodoo Wallet en LOG IN eerst\n'
-        + '4. Deze pagina Ctrl+F5, dan opnieuw verbinden\n\n'
-        + `Debug: ethereum=${info.hasEthereum} voodooGlobal=${info.hasVoodooGlobal} isVoodoo=${info.ethIsVoodoo} bridge=${Boolean(window.__VOODOO_BRIDGE_READY__)}`,
+        'Voodoo Wallet was not detected. Install the extension, open it and sign in, then refresh this page and try again.',
       );
       err.code = 'VOODOO_NOT_FOUND';
       err.installUrl = VOODOO_INSTALL_URL;

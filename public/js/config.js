@@ -47,7 +47,7 @@ function resolveStakingAddress(candidate) {
 
 window.VoodooConfig = {
   PLATFORM_MAP: 'StakingPlatformV4',
-  ASSET_VERSION: '24',
+  ASSET_VERSION: '28',
   VDO_ADDRESS: window.VoodooAddresses.VDO,
   /** Always V4 — getter so nothing can permanently stick a wrong value */
   get STAKING_ADDRESS() {
@@ -77,5 +77,7 @@ window.VoodooConfig = {
   },
 };
 
-// Freeze the V4 constant path for debugging
-console.info('[Voodoo] StakingPlatform V4 contract:', window.VoodooConfig.STAKING_ADDRESS);
+// Production: silent. Enable with window.VoodooDebug = true in the console if needed.
+if (window.VoodooDebug === true) {
+  console.info('[Voodoo] StakingPlatform V4 contract:', window.VoodooConfig.STAKING_ADDRESS);
+}

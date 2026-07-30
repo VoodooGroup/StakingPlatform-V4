@@ -33,7 +33,7 @@ body {
   z-index: 1;
 }
 
-body > *:not(#voodoo-bg):not(#calculatorModal) {
+body > *:not(#voodoo-bg):not(#calculatorModal):not(#voodooUiModal) {
   position: relative;
   z-index: 1;
 }
@@ -380,3 +380,191 @@ footer a { font-size: 30px !important; }
   justify-content: center;
 }
 #calculatorModal.hidden { display: none !important; }
+
+/* ── Modern in-dapp dialogs (replace chrome alert/confirm) ── */
+body.voodoo-ui-open {
+  overflow: hidden;
+}
+
+#voodooUiModal.voodoo-ui-modal,
+.voodoo-ui-modal {
+  position: fixed !important;
+  inset: 0;
+  z-index: 100000 !important;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  box-sizing: border-box;
+  pointer-events: auto;
+}
+
+#voodooUiModal.hidden,
+.voodoo-ui-modal.hidden {
+  display: none !important;
+}
+
+.voodoo-ui-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 18, 24, 0.72);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.voodoo-ui-panel {
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  max-width: 26rem;
+  margin: 0 auto;
+  padding: 1.75rem 1.5rem 1.35rem;
+  border-radius: 1rem;
+  background: linear-gradient(165deg, #0f3d4d 0%, #0a2f3c 55%, #082430 100%);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 24px 60px rgba(0, 0, 0, 0.45),
+    0 0 0 1px rgba(0, 0, 0, 0.2),
+    inset 0 1px 0 rgba(255, 255, 255, 0.06);
+  text-align: center;
+  color: #f8fafc;
+  animation: voodoo-ui-in 0.22s ease-out;
+}
+
+@keyframes voodoo-ui-in {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.voodoo-ui-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 3rem;
+  height: 3rem;
+  margin: 0 auto 0.85rem;
+  border-radius: 9999px;
+  font-size: 1.35rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #fff;
+  background: #2563eb;
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.35);
+  user-select: none;
+}
+
+.voodoo-ui-icon[data-type="error"] {
+  background: #dc2626;
+  box-shadow: 0 8px 20px rgba(220, 38, 38, 0.35);
+}
+
+.voodoo-ui-icon[data-type="success"] {
+  background: #16a34a;
+  box-shadow: 0 8px 20px rgba(22, 163, 74, 0.35);
+}
+
+.voodoo-ui-icon[data-type="warning"] {
+  background: #d97706;
+  box-shadow: 0 8px 20px rgba(217, 119, 6, 0.35);
+}
+
+.voodoo-ui-icon[data-type="info"] {
+  background: #0e7490;
+  box-shadow: 0 8px 20px rgba(14, 116, 144, 0.35);
+}
+
+.voodoo-ui-title {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  color: #fff;
+}
+
+.voodoo-ui-message {
+  margin: 0 0 1.35rem;
+  font-size: 0.95rem;
+  line-height: 1.5;
+  color: #cbd5e1;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.voodoo-ui-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: center;
+  align-items: center;
+}
+
+.voodoo-ui-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 6.5rem;
+  min-height: 2.5rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: 0.55rem;
+  border: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  line-height: 1;
+  cursor: pointer;
+  text-decoration: none;
+  box-sizing: border-box;
+  transition: background-color 0.15s ease, opacity 0.15s ease, transform 0.1s ease;
+}
+
+.voodoo-ui-btn:active {
+  transform: scale(0.98);
+}
+
+.voodoo-ui-btn-primary {
+  background: #2563eb;
+  color: #fff;
+}
+
+.voodoo-ui-btn-primary:hover {
+  background: #1d4ed8;
+}
+
+.voodoo-ui-btn-secondary {
+  background: #073749;
+  color: #fff;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.voodoo-ui-btn-secondary:hover {
+  background: #0a4a61;
+}
+
+.voodoo-ui-btn-ghost {
+  background: transparent;
+  color: #cbd5e1;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+}
+
+.voodoo-ui-btn-ghost:hover {
+  background: rgba(255, 255, 255, 0.06);
+  color: #fff;
+}
+
+@media (max-width: 480px) {
+  .voodoo-ui-panel {
+    padding: 1.4rem 1.15rem 1.15rem;
+  }
+  .voodoo-ui-actions {
+    flex-direction: column-reverse;
+    width: 100%;
+  }
+  .voodoo-ui-btn {
+    width: 100%;
+  }
+}

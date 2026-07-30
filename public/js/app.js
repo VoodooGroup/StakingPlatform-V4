@@ -191,14 +191,59 @@
     document.querySelectorAll('[id^="stakeBtn"]').forEach((b) => { b.disabled = true; });
   }
 
+  /** User-facing error text only — never append diagnose / bridge dumps. */
   function connectionErrorMessage(err) {
-    if (!err) return 'Unknown error';
+    if (!err) return 'Something went wrong. Please try again.';
     const msg = err.message || String(err);
-    if (err.code === 'VOODOO_NOT_FOUND' || /Voodoo Wallet not detected/i.test(msg)) {
-      const url = err.installUrl || window.VoodooWallet.VOODOO_INSTALL_URL;
-      return `${msg}\n\nInstall / docs: ${url}`;
+    if (err.code === 4001 || err.code === 'ACTION_REJECTED' || /user rejected|user denied|rejected the request/i.test(msg)) {
+      return 'Connection was cancelled in your wallet.';
     }
-    return msg;
+    if (err.code === 'VOODOO_NOT_FOUND' || /Voodoo Wallet not detected/i.test(msg)) {
+      return 'Voodoo Wallet was not detected. Install the extension, then refresh this page and try again.';
+    }
+    if (/MetaMask|no ethereum|no injected|wallet not found|not detected/i.test(msg)) {
+      return 'No browser wallet was found. Install MetaMask (or another wallet), then try again.';
+    }
+    // Strip raw technical dumps if they slipped into message
+    return msg
+      .replace(/\[debug\][\s\S]*/i, '')
+      .replace(/\ncode=[\s\S]*/i, '')
+      .trim() || 'Connection failed. Please try again.';
+  }
+
+  function connectionInstallUrl(err) {
+    if (!err) return null;
+    if (err.code === 'VOODOO_NOT_FOUND' || /Voodoo Wallet not detected/i.test(err.message || '')) {
+      return err.installUrl || window.VoodooWallet?.VOODOO_INSTALL_URL || null;
+    }
+    return null;
+  }
+
+  /** Show modern centered modal — never browser alert(). */
+  function showConnectError(title, err) {
+    // Optional console-only diagnose when explicitly enabled
+    if (window.VoodooUI?.isDebug?.()) {
+      Promise.resolve(err?.diagnose || window.VoodooWallet?.diagnose?.())
+        .then((d) => { if (d) console.error('[Voodoo diagnose]', d); })
+        .catch(() => {});
+    } else {
+      console.error(title, err);
+    }
+
+    const message = connectionErrorMessage(err);
+    const linkUrl = connectionInstallUrl(err);
+    const ui = window.VoodooUI;
+    if (ui?.alert) {
+      return ui.alert(message, {
+        title,
+        type: 'error',
+        okText: 'OK',
+        linkUrl: linkUrl || undefined,
+        linkText: 'Install Voodoo Wallet',
+      });
+    }
+    // Fallback only if ui.js failed to load
+    return Promise.resolve();
   }
 
   function bindConnectButton() {
@@ -213,9 +258,8 @@
         const result = await window.VoodooWallet.connect();
         await onWalletConnected(result);
       } catch (err) {
-        console.error(err);
         resetWalletUi();
-        alert('Connection failed: ' + connectionErrorMessage(err));
+        await showConnectError('Connection failed', err);
       }
     });
   }
@@ -236,35 +280,11 @@
         await onWalletConnected(result);
         // markConnectedUi sets short address on the button
       } catch (err) {
-        console.error('[Voodoo Wallet connect]', err);
-        let extra = '';
-        try {
-          const d = err.diagnose || (await window.VoodooWallet.diagnose?.());
-          if (d) {
-            extra = `\n\n[debug] voodooGlobal=${d.hasVoodooGlobal} ethIsVoodoo=${d.ethIsVoodoo} metamask=${d.ethIsMetaMask} bridge=${Boolean(window.__VOODOO_BRIDGE_READY__)}`;
-            console.error('[Voodoo diagnose]', d);
-          }
-        } catch {
-          /* ignore */
-        }
-        const detail = connectionErrorMessage(err) + extra
-          + `\n\ncode=${err?.code || '?'} bridgeReady=${Boolean(window.__VOODOO_BRIDGE_READY__)}`
-          + `\nvoodooEth=${Boolean(window.voodooEthereum)}`;
         resetWalletUi();
         setVoodooBtnLabel(null);
-
-        let box = document.getElementById('voodooConnectError');
-        if (!box) {
-          box = document.createElement('div');
-          box.id = 'voodooConnectError';
-          box.style.cssText = 'position:fixed;left:12px;right:12px;bottom:12px;z-index:99999;background:#7f1d1d;color:#fff;padding:14px 16px;border-radius:10px;font:13px/1.45 ui-monospace,monospace;white-space:pre-wrap;max-height:45vh;overflow:auto;box-shadow:0 8px 30px rgba(0,0,0,.4)';
-          document.body.appendChild(box);
-        }
-        box.textContent = 'Voodoo Wallet verbinding mislukt\n\n' + detail
-          + '\n\n(Klik dit vak om te sluiten)';
-        box.onclick = () => box.remove();
-
-        alert('Voodoo Wallet verbinding mislukt:\n\n' + detail);
+        // Remove any leftover debug banner from older builds
+        document.getElementById('voodooConnectError')?.remove();
+        await showConnectError('Voodoo Wallet connection failed', err);
       }
     });
   }
