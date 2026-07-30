@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ConnectButton,
   RainbowKitProvider,
@@ -8,6 +8,8 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { disconnect as coreDisconnect, getAccount, getConnections } from '@wagmi/core';
 import { WagmiProvider, useAccount } from 'wagmi';
 import { config, pulseChain, projectId } from './config';
+import WcQrOverlay from './WcQrOverlay.jsx';
+import { openWalletConnectSession, disconnectWalletConnect } from './openWalletConnect.js';
 
 const queryClient = new QueryClient();
 
@@ -83,12 +85,113 @@ async function killAllSessions() {
   await sleep(80);
 }
 
+function isWalletConnectRowClick(target) {
+  if (!(target instanceof Element)) return false;
+  const opt = target.closest('[data-testid*="wallet-option"]');
+  if (!opt) return false;
+  const id = (opt.getAttribute('data-testid') || '').toLowerCase();
+  const text = (opt.textContent || '').toLowerCase();
+  return (
+    id.includes('walletconnect')
+    || id.includes('voodoo-walletconnect')
+    || text.includes('walletconnect')
+  );
+}
+
 function BridgeInner() {
   const { address, isConnected, connector, status } = useAccount();
   const lastEmitted = useRef('');
   const openConnectFn = useRef(null);
   const openAccountFn = useRef(null);
   const readyOnce = useRef(false);
+  const wcBusy = useRef(false);
+  const wcAbort = useRef(0);
+
+  const [wcOpen, setWcOpen] = useState(false);
+  const [wcUri, setWcUri] = useState('');
+  const [wcStatus, setWcStatus] = useState('idle');
+  const [wcError, setWcError] = useState('');
+
+  const closeWcOverlay = useCallback(async () => {
+    wcAbort.current += 1;
+    setWcOpen(false);
+    setWcUri('');
+    setWcStatus('idle');
+    setWcError('');
+    wcBusy.current = false;
+    try {
+      await disconnectWalletConnect();
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  /**
+   * OUR QR overlay — not RainbowKit "What is a wallet?", not missing WC modal package.
+   * display_uri → QR image the user can scan.
+   */
+  const startWalletConnectQr = useCallback(async () => {
+    if (wcBusy.current) return;
+    wcBusy.current = true;
+    const session = ++wcAbort.current;
+
+    setWcOpen(true);
+    setWcUri('');
+    setWcError('');
+    setWcStatus('loading');
+    console.info('[WalletConnect] starting QR session…');
+
+    await openWalletConnectSession({
+      onUri: (uri) => {
+        if (session !== wcAbort.current) return;
+        setWcUri(uri);
+        setWcStatus('qr');
+      },
+      onConnected: () => {
+        if (session !== wcAbort.current) return;
+        setWcStatus('connected');
+        setTimeout(() => {
+          if (session === wcAbort.current) {
+            setWcOpen(false);
+            setWcStatus('idle');
+            wcBusy.current = false;
+          }
+        }, 500);
+      },
+      onError: (err) => {
+        if (session !== wcAbort.current) return;
+        wcBusy.current = false;
+        if (err?.code === 'ACTION_REJECTED' || /cancel/i.test(err?.message || '')) {
+          setWcOpen(false);
+          setWcStatus('idle');
+          return;
+        }
+        setWcStatus('error');
+        setWcError(String(err?.message || err || 'Failed'));
+      },
+    });
+  }, []);
+
+  /**
+   * Intercept WalletConnect row in RainbowKit (by testid OR label text).
+   * Stop RK from navigating to intro/"What is a wallet?" — open our QR instead.
+   */
+  useEffect(() => {
+    const onClickCapture = (e) => {
+      const t = e.target;
+      if (!isWalletConnectRowClick(t)) return;
+
+      e.preventDefault();
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+
+      console.info('[WalletConnect] row click intercepted → own QR overlay');
+      startWalletConnectQr();
+    };
+
+    document.addEventListener('click', onClickCapture, true);
+    return () => document.removeEventListener('click', onClickCapture, true);
+  }, [startWalletConnectQr]);
 
   // Wire RainbowKit/WC connection → static staking page
   useEffect(() => {
@@ -279,6 +382,7 @@ function BridgeInner() {
       },
       hardReset,
       disconnect: hardReset,
+      openWalletConnectQr: startWalletConnectQr,
       isConnected: () => Boolean(isConnected && address),
       getAddress: () => address || null,
       getStatus: () => status,
@@ -286,61 +390,71 @@ function BridgeInner() {
     window.dispatchEvent(new CustomEvent('voodoo:rainbow-ready'));
     if (!readyOnce.current) {
       readyOnce.current = true;
-      console.info('[RainbowKit] ready — WalletConnect is in Other modal');
+      console.info('[RainbowKit] ready — WalletConnect uses own QR overlay (not RK intro)');
     }
-  }, [isConnected, address, status, openConnect, hardReset]);
+  }, [isConnected, address, status, openConnect, hardReset, startWalletConnectQr]);
 
   return (
-    <div
-      id="voodoo-rk-host"
-      style={{
-        position: 'fixed',
-        left: -9999,
-        top: 0,
-        width: 1,
-        height: 1,
-        overflow: 'hidden',
-        opacity: 0,
-        pointerEvents: 'none',
-      }}
-    >
-      <ConnectButton.Custom>
-        {({
-          account,
-          chain,
-          openAccountModal,
-          openConnectModal,
-          openChainModal,
-          mounted,
-        }) => {
-          openConnectFn.current = typeof openConnectModal === 'function' ? openConnectModal : null;
-          openAccountFn.current = typeof openAccountModal === 'function' ? openAccountModal : null;
-          const connected = Boolean(mounted && account && chain);
-
-          return (
-            <div style={{ pointerEvents: 'auto' }}>
-              <button
-                type="button"
-                id="voodoo-rk-connect-btn"
-                onClick={() => openConnectModal?.()}
-              >
-                Connect
-              </button>
-              {connected ? (
-                <button type="button" id="voodoo-rk-account-btn" onClick={() => openAccountModal?.()}>
-                  Account
-                </button>
-              ) : null}
-              {connected && chain?.unsupported ? (
-                <button type="button" onClick={() => openChainModal?.()}>
-                  Network
-                </button>
-              ) : null}
-            </div>
-          );
+    <>
+      <WcQrOverlay
+        open={wcOpen}
+        uri={wcUri}
+        status={wcStatus}
+        error={wcError}
+        onClose={closeWcOverlay}
+        onRetry={() => startWalletConnectQr()}
+      />
+      <div
+        id="voodoo-rk-host"
+        style={{
+          position: 'fixed',
+          left: -9999,
+          top: 0,
+          width: 1,
+          height: 1,
+          overflow: 'hidden',
+          opacity: 0,
+          pointerEvents: 'none',
         }}
-      </ConnectButton.Custom>
-    </div>
+      >
+        <ConnectButton.Custom>
+          {({
+            account,
+            chain,
+            openAccountModal,
+            openConnectModal,
+            openChainModal,
+            mounted,
+          }) => {
+            openConnectFn.current = typeof openConnectModal === 'function' ? openConnectModal : null;
+            openAccountFn.current = typeof openAccountModal === 'function' ? openAccountModal : null;
+            const connected = Boolean(mounted && account && chain);
+
+            return (
+              <div style={{ pointerEvents: 'auto' }}>
+                <button
+                  type="button"
+                  id="voodoo-rk-connect-btn"
+                  onClick={() => openConnectModal?.()}
+                >
+                  Connect
+                </button>
+                {connected ? (
+                  <button type="button" id="voodoo-rk-account-btn" onClick={() => openAccountModal?.()}>
+                    Account
+                  </button>
+                ) : null}
+                {connected && chain?.unsupported ? (
+                  <button type="button" onClick={() => openChainModal?.()}>
+                    Network
+                  </button>
+                ) : null}
+              </div>
+            );
+          }}
+        </ConnectButton.Custom>
+      </div>
+    </>
   );
 }
 

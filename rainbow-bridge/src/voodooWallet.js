@@ -1,3 +1,11 @@
+/**
+ * Voodoo Wallet for RainbowKit — must open the browser extension on click.
+ *
+ * Fixes:
+ * - Detect via flags, globals, ethereum.providers, AND EIP-6963 (rdns app.voodoowallet)
+ * - installed not frozen false at load (would show install UI, never eth_requestAccounts)
+ * - connect() waits for EIP-6963 then calls eth_requestAccounts on THAT provider
+ */
 import { createConnector } from 'wagmi';
 import { injected } from 'wagmi/connectors';
 import { VOODOO_WALLET_ICON } from './voodooIconData.js';
@@ -5,60 +13,157 @@ import { VOODOO_WALLET_ICON } from './voodooIconData.js';
 const INSTALL_URL = 'https://github.com/Voodoo-Token/voodoo-pulse-extension';
 const RDNS = 'app.voodoowallet';
 
+/** @type {any} */
+let cachedProvider = null;
+let eip6963Listening = false;
+
 function isVoodooProvider(provider) {
   if (!provider) return false;
   if (provider.isVoodooWallet === true || provider._isVoodooWallet === true) return true;
-  if (typeof provider.providerInfo?.rdns === 'string'
-    && provider.providerInfo.rdns.toLowerCase() === RDNS) {
+  if (typeof window !== 'undefined') {
+    if (provider === window.voodooEthereum || provider === window.VoodooWalletProvider) return true;
+  }
+  if (
+    typeof provider.providerInfo?.rdns === 'string'
+    && provider.providerInfo.rdns.toLowerCase() === RDNS
+  ) {
     return true;
   }
   return false;
 }
 
-function findVoodooProvider() {
+function listInjected() {
+  if (typeof window === 'undefined') return [];
+  if (window.location?.protocol === 'file:') return [];
+  const out = [];
+  const push = (p) => {
+    if (p && !out.includes(p)) out.push(p);
+  };
+  push(window.voodooEthereum);
+  push(window.VoodooWalletProvider);
+  const eth = window.ethereum;
+  if (eth) {
+    if (Array.isArray(eth.providers)) eth.providers.forEach(push);
+    push(eth);
+  }
+  return out;
+}
+
+function matchAnnounce(detail) {
+  const info = detail?.info;
+  const provider = detail?.provider;
+  if (!provider) return null;
+  const rdns = String(info?.rdns || '').toLowerCase();
+  const name = String(info?.name || '');
+  if (rdns === RDNS || /voodoo\s*wallet/i.test(name) || isVoodooProvider(provider)) {
+    return provider;
+  }
+  return null;
+}
+
+function ensureEip6963Listener() {
+  if (typeof window === 'undefined' || eip6963Listening) return;
+  eip6963Listening = true;
+  window.addEventListener('eip6963:announceProvider', (event) => {
+    const p = matchAnnounce(event?.detail);
+    if (p) {
+      cachedProvider = p;
+      console.info('[VoodooWallet/RK] EIP-6963 provider cached');
+    }
+  });
+  try {
+    window.dispatchEvent(new Event('eip6963:requestProvider'));
+  } catch {
+    /* ignore */
+  }
+}
+
+function findVoodooSync() {
+  if (cachedProvider) return cachedProvider;
   if (typeof window === 'undefined') return undefined;
 
   if (window.voodooEthereum && isVoodooProvider(window.voodooEthereum)) {
-    return window.voodooEthereum;
+    cachedProvider = window.voodooEthereum;
+    return cachedProvider;
   }
   if (window.VoodooWalletProvider && isVoodooProvider(window.VoodooWalletProvider)) {
-    return window.VoodooWalletProvider;
+    cachedProvider = window.VoodooWalletProvider;
+    return cachedProvider;
   }
-
-  const eth = window.ethereum;
-  if (!eth) return undefined;
-
-  if (Array.isArray(eth.providers) && eth.providers.length) {
-    const found = eth.providers.find(isVoodooProvider);
-    if (found) return found;
+  const fromList = listInjected().find(isVoodooProvider);
+  if (fromList) {
+    cachedProvider = fromList;
+    return cachedProvider;
   }
-
-  if (isVoodooProvider(eth)) return eth;
   return undefined;
 }
 
-function isVoodooInstalled() {
-  return Boolean(findVoodooProvider());
+function discoverVoodooViaEip6963(timeoutMs = 1500) {
+  ensureEip6963Listener();
+  const sync = findVoodooSync();
+  if (sync) return Promise.resolve(sync);
+
+  return new Promise((resolve) => {
+    if (typeof window === 'undefined') {
+      resolve(undefined);
+      return;
+    }
+    let settled = false;
+    const finish = (provider) => {
+      if (settled) return;
+      settled = true;
+      window.removeEventListener('eip6963:announceProvider', onAnnounce);
+      if (provider) cachedProvider = provider;
+      resolve(provider || undefined);
+    };
+    function onAnnounce(event) {
+      const p = matchAnnounce(event?.detail);
+      if (p) finish(p);
+    }
+    window.addEventListener('eip6963:announceProvider', onAnnounce);
+    try {
+      window.dispatchEvent(new Event('eip6963:requestProvider'));
+    } catch {
+      /* ignore */
+    }
+    setTimeout(() => finish(findVoodooSync()), timeoutMs);
+  });
+}
+
+async function resolveVoodooProvider() {
+  ensureEip6963Listener();
+  return (await discoverVoodooViaEip6963(1500)) || findVoodooSync();
+}
+
+if (typeof window !== 'undefined') {
+  ensureEip6963Listener();
+  setTimeout(() => {
+    try {
+      window.dispatchEvent(new Event('eip6963:requestProvider'));
+    } catch {
+      /* ignore */
+    }
+  }, 400);
 }
 
 /**
- * Custom RainbowKit wallet — icon is the Desktop voodoo-wallet.png
- * embedded as a data-URL (always loads, no 404/cache issues).
- *
- * NOTE: do NOT set `rdns` to app.voodoowallet when multiInjectedProviderDiscovery
- * is on — RK replaces this entry with EIP-6963 and drops our custom icon.
- * We keep discovery OFF in config so this branded entry always wins.
+ * RainbowKit CreateWalletFn
  */
-export function voodooWallet() {
+export function voodooWallet(_options = {}) {
+  // Prefer ready=true so click runs connect() (opens extension).
+  // If truly missing, connect() throws a clear install error.
+  const detected = Boolean(findVoodooSync());
+
   return {
     id: 'voodoo',
     name: 'Voodoo Wallet',
     shortName: 'Voodoo',
-    // RainbowKit accepts string OR async () => string (same as official wallets)
+    // Desktop/voodoo-wallet.png embedded as data-URL (regenerated from Desktop copy)
     iconUrl: async () => VOODOO_WALLET_ICON,
     iconBackground: '#ffffff',
     iconAccent: '#073749',
-    installed: isVoodooInstalled(),
+    // undefined => ready true in RK when not detected yet (EIP-6963 may arrive late)
+    installed: detected ? true : undefined,
     hidden: () => false,
     downloadUrls: {
       browserExtension: INSTALL_URL,
@@ -72,36 +177,90 @@ export function voodooWallet() {
             step: 'install',
             title: 'Install Voodoo Wallet',
             description:
-              'Install the Voodoo Wallet browser extension from the official GitHub release, then refresh this page.',
+              'Install the Voodoo Wallet browser extension, then refresh this page.',
           },
           {
             step: 'create',
-            title: 'Create or import a wallet',
-            description: 'Open Voodoo Wallet and create a new wallet or import an existing one.',
+            title: 'Unlock the extension',
+            description: 'Open Voodoo Wallet and unlock / sign in.',
           },
           {
             step: 'refresh',
-            title: 'Refresh and connect',
-            description: 'After the extension is ready, refresh this page and select Voodoo Wallet again.',
+            title: 'Connect again',
+            description: 'Click Voodoo Wallet again to open the extension connect prompt.',
           },
         ],
       },
     },
-    createConnector: (walletDetails) => {
-      return createConnector((config) => ({
-        ...injected({
+    createConnector: (walletDetails) =>
+      createConnector((config) => {
+        const base = injected({
           target: () => {
-            const provider = findVoodooProvider();
+            const provider = findVoodooSync();
             return {
               id: 'voodoo',
               name: 'Voodoo Wallet',
               provider,
             };
           },
-        })(config),
-        ...walletDetails,
-      }));
-    },
+          unstable_shimAsyncInject: 2500,
+        })(config);
+
+        return {
+          ...base,
+          ...walletDetails,
+          id: 'voodoo',
+          name: 'Voodoo Wallet',
+          type: base.type || 'injected',
+
+          async getProvider() {
+            const p = await resolveVoodooProvider();
+            if (p) return p;
+            try {
+              return await base.getProvider?.();
+            } catch {
+              return undefined;
+            }
+          },
+
+          async connect(parameters) {
+            const provider = await resolveVoodooProvider();
+            if (!provider) {
+              const err = new Error(
+                'Voodoo Wallet not detected. Install and unlock the extension, then refresh this page.',
+              );
+              err.name = 'ProviderNotFoundError';
+              throw err;
+            }
+            cachedProvider = provider;
+            console.info('[VoodooWallet/RK] opening extension (eth_requestAccounts)…');
+
+            // Explicitly open the extension popup before wagmi connect
+            try {
+              await provider.request({ method: 'eth_requestAccounts' });
+            } catch (e) {
+              // User reject → rethrow; other errors still try base.connect
+              if (e?.code === 4001 || /reject|denied/i.test(String(e?.message || ''))) {
+                throw e;
+              }
+              console.warn('[VoodooWallet/RK] eth_requestAccounts', e);
+            }
+
+            return base.connect(parameters);
+          },
+
+          async isAuthorized() {
+            try {
+              const provider = await resolveVoodooProvider();
+              if (!provider) return false;
+              const accounts = await provider.request({ method: 'eth_accounts' });
+              return Array.isArray(accounts) && accounts.length > 0;
+            } catch {
+              return false;
+            }
+          },
+        };
+      }),
   };
 }
 

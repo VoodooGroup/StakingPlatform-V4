@@ -1,7 +1,6 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
   metaMaskWallet,
-  walletConnectWallet,
   rabbyWallet,
   trustWallet,
   ledgerWallet,
@@ -20,8 +19,9 @@ import { http } from 'wagmi';
 import { mainnet, pulsechain } from 'viem/chains';
 import { voodooWallet } from './voodooWallet.js';
 import { pulseWallet } from './pulseWallets.js';
+import { walletConnectOfficial } from './walletConnectOfficial.js';
 
-/** Your Reown Cloud project ID (dashboard.reown.com) */
+/** Reown Cloud project ID — required for WalletConnect QR relay */
 export const projectId = '16b6c9873265aaba89707f9f131e42c3';
 
 const pulseRpc = 'https://rpc.pulsechain.com';
@@ -37,12 +37,18 @@ export const pulseChain = {
 
 export const appName = 'Voodoo Staking Portal';
 export const appDescription = 'Stake VDO on PulseChain — VoodooGroup';
-export const appUrl = 'https://voodootoken.com';
+export const appUrl =
+  typeof window !== 'undefined' && window.location?.origin
+    ? window.location.origin
+    : 'https://voodootoken.com';
 export const appIcon = 'https://voodootoken.com/Voodoo-Token-Logo.png';
 
 /**
- * RainbowKit wallet list — WalletConnect is INSIDE the modal (Other button).
- * pulseWallet() only strips QR hang from extension wallets; WC is NOT wrapped.
+ * Other button → RainbowKit list:
+ * - Voodoo: browser extension
+ * - WalletConnect: OFFICIAL QR modal (showQrModal:true) — not RK in-modal QR
+ * - Other extensions: MetaMask, Rabby, …
+ * pulseWallet strips QR hangs from injected wallets only.
  */
 const wallets = [
   {
@@ -50,10 +56,10 @@ const wallets = [
     wallets: [
       pulseWallet(voodooWallet),
       pulseWallet(metaMaskWallet),
+      // Official WC QR modal — do NOT wrap with pulseWallet
+      walletConnectOfficial,
       pulseWallet(rabbyWallet),
       pulseWallet(trustWallet),
-      // WalletConnect inside RainbowKit (required by product)
-      walletConnectWallet,
       pulseWallet(braveWallet),
       pulseWallet(okxWallet),
       pulseWallet(ledgerWallet),
@@ -89,6 +95,7 @@ export const config = getDefaultConfig({
   ssr: false,
   multiInjectedProviderDiscovery: false,
   walletConnectParameters: {
+    // Default for other WC-backed wallets; our official entry forces showQrModal:true itself
     metadata: {
       name: appName,
       description: appDescription,
@@ -98,4 +105,6 @@ export const config = getDefaultConfig({
   },
 });
 
-console.info('[RainbowKit] projectId:', projectId.slice(0, 8) + '…', '| WalletConnect: ON');
+console.info(
+  '[RainbowKit] Voodoo extension + WalletConnect official QR modal | projectId=16b6c987…',
+);

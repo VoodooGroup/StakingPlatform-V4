@@ -14,13 +14,16 @@
  */
 
 function stripBlockingUris(wallet) {
-  if (!wallet || wallet.id === 'walletConnect') return wallet;
+  // Never strip pure WalletConnect QR wallets (we removed WC from the list, keep guard)
+  if (!wallet || wallet.id === 'walletConnect' || wallet.id === 'voodoo-wc-qr') {
+    return wallet;
+  }
 
   const next = { ...wallet };
 
   if (next.qrCode) {
     const { getUri, ...qrRest } = next.qrCode;
-    // Keep optional instructions; drop getUri so RK does not await display_uri
+    // Drop getUri so RK does not await display_uri (hangs extension wallets)
     next.qrCode = Object.keys(qrRest).length ? qrRest : undefined;
   }
 
@@ -32,6 +35,13 @@ function stripBlockingUris(wallet) {
   if (next.mobile?.getUri) {
     const { getUri, ...mobRest } = next.mobile;
     next.mobile = Object.keys(mobRest).length ? mobRest : undefined;
+  }
+
+  // Injected / Voodoo: force pure extension connect path (no QR step)
+  if (next.id === 'voodoo' || next.id === 'metaMask' || next.id === 'rabby' || next.id === 'brave') {
+    delete next.qrCode;
+    delete next.mobile;
+    delete next.desktop;
   }
 
   return next;
