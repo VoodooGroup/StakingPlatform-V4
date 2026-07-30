@@ -2,36 +2,12 @@ import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { mainnet } from '@reown/appkit/networks';
 
 /**
- * Get a free Project ID: https://dashboard.reown.com
- *
- * Priority:
- * 1. VITE_WALLETCONNECT_PROJECT_ID / VITE_WC_PROJECT_ID (build-time)
- * 2. window.VoodooConfig.WC_PROJECT_ID (runtime)
- * 3. Demo fallback (replace for production)
+ * Reown Cloud Project ID — https://dashboard.reown.com
+ * (Public client id; safe in frontend. Override at runtime via window.VoodooConfig.WC_PROJECT_ID)
  */
-function resolveProjectId() {
-  try {
-    const fromEnv =
-      (typeof import.meta !== 'undefined' && (
-        import.meta.env?.VITE_WALLETCONNECT_PROJECT_ID
-        || import.meta.env?.VITE_WC_PROJECT_ID
-      )) || '';
-    const v = String(fromEnv).trim();
-    if (v && !/your_project|YOUR_PROJECT|your_walletconnect/i.test(v)) return v;
-  } catch {
-    /* ignore */
-  }
-  try {
-    const fromWindow = typeof window !== 'undefined' && window.VoodooConfig?.WC_PROJECT_ID;
-    if (fromWindow && String(fromWindow).trim()) return String(fromWindow).trim();
-  } catch {
-    /* ignore */
-  }
-  // Temporary demo id — create your own at dashboard.reown.com for production
-  return '21fef48091f12692cad574a6f7753643';
-}
-
-export const projectId = resolveProjectId();
+export const projectId = (typeof window !== 'undefined' && window.VoodooConfig?.WC_PROJECT_ID)
+  ? String(window.VoodooConfig.WC_PROJECT_ID).trim()
+  : '16b6c9873265aaba89707f9f131e42c3';
 
 /** PulseChain as AppKit / CAIP network */
 export const pulseChain = {
