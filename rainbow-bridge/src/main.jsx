@@ -4,7 +4,7 @@ import '@rainbow-me/rainbowkit/styles.css';
 import App from './App.jsx';
 
 function mount() {
-  let el = document.getElementById('rainbowkit-root');
+  let el = document.getElementById('rainbowkit-root') || document.getElementById('appkit-root');
   if (!el) {
     el = document.createElement('div');
     el.id = 'rainbowkit-root';
@@ -13,28 +13,25 @@ function mount() {
 
   window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
     ready: false,
+    engine: 'rainbowkit',
     openConnectModal() {
-      console.warn('[VoodooRainbow] still loading…');
+      console.warn('[RainbowKit] still loading…');
       return false;
-    },
-    openWalletConnect() {
-      return Promise.reject(new Error('WalletConnect is still loading…'));
     },
   });
 
   try {
     createRoot(el).render(<App />);
-    console.info('[VoodooRainbow] React mounted');
+    console.info('[RainbowKit] mounted — WalletConnect is inside the Other modal');
   } catch (err) {
-    console.error('[VoodooRainbow] mount failed', err);
-    window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
+    console.error('[RainbowKit] mount failed', err);
+    window.VoodooRainbow = {
       ready: false,
       error: String(err?.message || err),
       openConnectModal() {
-        console.error('[VoodooRainbow] dead:', err);
         return false;
       },
-    });
+    };
   }
 }
 

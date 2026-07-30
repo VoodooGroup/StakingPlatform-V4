@@ -16,8 +16,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/staking.css?v=48" />
-  <link rel="stylesheet" href="/js/appkit-bridge.css?v=48" />
+  <link rel="stylesheet" href="/css/staking.css?v=49" />
+  <link rel="stylesheet" href="/js/rainbow-bridge.css?v=49" />
 </head>
 <body class="flex flex-col">
 
@@ -43,13 +43,13 @@
         type="button"
         id="connectBtn"
         class="wallet-btn wallet-btn-other"
-        title="Other wallets via Reown AppKit (WalletConnect, MetaMask, Rabby, …)"
+        title="RainbowKit: WalletConnect, MetaMask, Rabby, Trust, OKX, …"
       >Other</button>
     </div>
   </nav>
 
-  <!-- Reown AppKit React island (WalletConnect + multi-wallet) -->
-  <div id="appkit-root"></div>
+  <!-- RainbowKit island (WalletConnect is inside this modal) -->
+  <div id="rainbowkit-root"></div>
 
   <div class="flex justify-center mt-6 mb-4">
     <img data-sp4="flowIcons" src="/icons.png" alt="Staking flow" class="w-64 h-auto" style="background:transparent" />
@@ -108,27 +108,27 @@
     </div>
   </div>
 
-  <script src="/js/config.js?v=48"></script>
-  <script src="/js/ui.js?v=48"></script>
-  <script src="/js/StakingPlatformV4.js?v=48"></script>
-  <script src="/js/stakingAbi.js?v=48"></script>
-  <script src="/js/contracts.js?v=48"></script>
-  <script src="/js/wallet.js?v=48"></script>
-  <script src="/js/apy.js?v=48"></script>
-  <script src="/js/calculator.js?v=48"></script>
-  <script src="/js/pools.js?v=48"></script>
-  <script src="/js/poolRenderer.js?v=48"></script>
-  <script src="/js/activeSince.js?v=48"></script>
-  <script src="/js/app.js?v=48"></script>
-  <!-- Reown AppKit (WalletConnect + multi-wallet) -->
-  <script src="/js/appkit-bridge.js?v=48" defer></script>
+  <script src="/js/config.js?v=49"></script>
+  <script src="/js/ui.js?v=49"></script>
+  <script src="/js/StakingPlatformV4.js?v=49"></script>
+  <script src="/js/stakingAbi.js?v=49"></script>
+  <script src="/js/contracts.js?v=49"></script>
+  <script src="/js/wallet.js?v=49"></script>
+  <script src="/js/apy.js?v=49"></script>
+  <script src="/js/calculator.js?v=49"></script>
+  <script src="/js/pools.js?v=49"></script>
+  <script src="/js/poolRenderer.js?v=49"></script>
+  <script src="/js/activeSince.js?v=49"></script>
+  <script src="/js/app.js?v=49"></script>
+  <!-- RainbowKit: WalletConnect is inside the Other modal -->
+  <script src="/js/rainbow-bridge.js?v=49" defer></script>
   <script>
     window.addEventListener('load', function () {
       setTimeout(function () {
         if (!window.VoodooRainbow || !window.VoodooRainbow.ready) {
-          console.error('[Voodoo] AppKit bridge not ready. Check Network for /js/appkit-bridge.js');
+          console.error('[Voodoo] RainbowKit not ready. Check Network for /js/rainbow-bridge.js');
         } else {
-          console.info('[Voodoo] AppKit ready projectId=' + String(window.VoodooRainbow.projectId || '').slice(0, 8) + '…');
+          console.info('[Voodoo] RainbowKit ready — WalletConnect is in Other modal. projectId=' + String(window.VoodooRainbow.projectId || '').slice(0, 8) + '…');
         }
       }, 2500);
     });

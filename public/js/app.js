@@ -37,7 +37,7 @@
       connectBtn.disabled = false;
       connectBtn.classList.remove('is-connected');
       connectBtn.textContent = 'Other';
-      connectBtn.title = 'Other wallets (WalletConnect, MetaMask, Rabby, …)';
+      connectBtn.title = 'RainbowKit: WalletConnect, MetaMask, Rabby, Trust, …';
     }
 
     if (voodooBtn) {
@@ -275,26 +275,30 @@
       if (!window.VoodooRainbow?.ready) {
         await showConnectError(
           'Wallets still loading',
-          new Error('AppKit is not ready yet. Wait 2 seconds and click Other again.'),
+          new Error('RainbowKit is not ready yet. Wait 2 seconds and click Other again.'),
         );
         return;
       }
 
       try {
-        const opened = await window.VoodooRainbow.openConnectModal({ mode: 'connect' });
+        // Opens RainbowKit modal — WalletConnect is inside that list
+        const opened = await window.VoodooRainbow.openConnectModal({
+          mode: 'connect',
+          forceConnect: true,
+        });
         if (opened === false) {
           await showConnectError(
-            'Could not open wallet modal',
-            new Error('AppKit did not open. Refresh the page and try again.'),
+            'Could not open RainbowKit',
+            new Error('Modal did not open. Refresh the page and try again.'),
           );
           return;
         }
       } catch (e) {
-        await showConnectError('Could not open wallet modal', e);
+        await showConnectError('Could not open RainbowKit', e);
         return;
       }
 
-      // Wait for AppKit connection → wires staking contracts
+      // Wait for wallet pick (incl. WalletConnect) → wire staking
       try {
         const result = await window.VoodooWallet.connectOther();
         if (result?.userAddress) {
@@ -305,7 +309,13 @@
           || err?.code === 4001
           || err?.code === 'ACTION_REJECTED'
           || /timed out|cancelled|rejected|denied/i.test(err?.message || '');
-        if (!quiet) console.error('AppKit connect error', err);
+        if (!quiet) console.error('RainbowKit connect error', err);
+        // Clear zombie WC session so Other can open again
+        try {
+          await window.VoodooRainbow?.hardReset?.();
+        } catch {
+          /* ignore */
+        }
         if (!userAddress) btn.textContent = 'Other';
       }
     });
