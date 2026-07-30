@@ -72,6 +72,14 @@ function RainbowBridgeInner() {
   const lastEmitted = useRef('');
   const wasModalOpen = useRef(false);
   const closeTimer = useRef(null);
+  // Live refs so openModalSafe never uses a stale isConnected after disconnect
+  const connectedRef = useRef(false);
+  const addressRef = useRef(null);
+
+  useEffect(() => {
+    connectedRef.current = Boolean(isConnected && address);
+    addressRef.current = address || null;
+  }, [isConnected, address]);
 
   const emitConnected = useCallback(async () => {
     if (!isConnected || !address) return;
@@ -79,9 +87,9 @@ function RainbowBridgeInner() {
       let eip1193 = null;
       if (connector?.getProvider) {
         try {
-          eip1193 = await connector.getProvider({ chainId: pulseChain.id });
-        } catch {
           eip1193 = await connector.getProvider();
+        } catch (e) {
+          console.warn('[VoodooRainbow] getProvider failed', e);
         }
       }
       if (!eip1193) eip1193 = clientToEip1193(connectorClient);
@@ -102,6 +110,7 @@ function RainbowBridgeInner() {
         walletKind: 'rainbow',
       };
 
+      // Notify dapp FIRST — before chain switch (switch can hang on WC)
       window.dispatchEvent(new CustomEvent('voodoo:rainbow-connected', { detail }));
       if (typeof window.VoodooRainbow?._onConnected === 'function') {
         try {
@@ -111,10 +120,11 @@ function RainbowBridgeInner() {
         }
       }
 
+      // Best-effort PulseChain after dapp is live
       if (switchChainAsync) {
         Promise.race([
           switchChainAsync({ chainId: pulseChain.id }),
-          new Promise((resolve) => setTimeout(resolve, 8000)),
+          new Promise((resolve) => setTimeout(resolve, 6000)),
         ]).catch((err) => {
           console.warn('[VoodooRainbow] switch to PulseChain deferred:', err?.message || err);
         });
@@ -141,15 +151,8 @@ function RainbowBridgeInner() {
   }, [isConnected]);
 
   /**
-   * Modal closed without a full connection.
-   *
-   * IMPORTANT: do NOT disconnect() immediately here.
-   * WalletConnect pairing can briefly report connectModalOpen=false while
-   * spinning up the QR step — disconnecting kills the session and looks like
-   * "popup closed, nothing happened", then stuck connecting blocks reopen.
-   *
-   * Only notify the dapp (so Other can be clicked again). Clear stuck
-   * connecting state on the *next open*, not on close.
+   * Only fire "dismissed" when user closed WITHOUT connecting.
+   * On successful WC connect, modal closes with isConnected=true — do not treat as cancel.
    */
   useEffect(() => {
     if (closeTimer.current) {
@@ -159,13 +162,17 @@ function RainbowBridgeInner() {
 
     if (wasModalOpen.current && !connectModalOpen && !isConnected) {
       closeTimer.current = setTimeout(() => {
-        // Still closed and not connected after debounce → user really dismissed
-        if (!isConnected) {
+        if (!connectedRef.current) {
           window.dispatchEvent(new CustomEvent('voodoo:rainbow-modal-closed', {
             detail: { reason: 'dismissed' },
           }));
         }
-      }, 500);
+      }, 600);
+    }
+
+    // Successful connect closes the modal — tell dapp waiters we are done opening UI
+    if (wasModalOpen.current && !connectModalOpen && isConnected && address) {
+      // no modal-closed cancel event
     }
 
     wasModalOpen.current = Boolean(connectModalOpen);
@@ -181,28 +188,45 @@ function RainbowBridgeInner() {
         closeTimer.current = null;
       }
     };
-  }, [connectModalOpen, isConnected, status]);
+  }, [connectModalOpen, isConnected, address, status]);
 
   useEffect(() => {
-    /**
-     * Always-safe open: clear half-open WC/injected connect first so the modal
-     * can open again after a failed WalletConnect click.
-     */
-    const openModalSafe = async () => {
+    const hardReset = async () => {
+      lastEmitted.current = '';
+      connectedRef.current = false;
+      addressRef.current = null;
       try {
-        if (isConnected && address) {
-          openAccountModal?.();
-          return true;
+        await disconnectAsync?.();
+      } catch {
+        /* ignore */
+      }
+      // Allow React/wagmi to settle
+      await new Promise((r) => setTimeout(r, 200));
+    };
+
+    /**
+     * @param {{ mode?: 'auto'|'connect'|'account' }} [opts]
+     * - auto: account modal if fully connected, else connect modal
+     * - connect: always open connect list (disconnect first if needed)
+     * - account: open account modal if connected
+     */
+    const openModalSafe = async (opts = {}) => {
+      const mode = opts.mode || 'auto';
+      try {
+        const liveConnected = connectedRef.current || (isConnected && address);
+
+        if (mode === 'account' || (mode === 'auto' && liveConnected && !opts.forceConnect)) {
+          if (liveConnected && openAccountModal) {
+            openAccountModal();
+            return true;
+          }
         }
 
-        // Stuck "connecting" after WC failure blocks RainbowKit from reopening
-        if (isConnecting || isReconnecting || status === 'connecting' || status === 'reconnecting') {
-          try {
-            await disconnectAsync?.();
-          } catch {
-            /* ignore */
-          }
-          await new Promise((r) => setTimeout(r, 150));
+        // Only reset when forced, stuck connecting, or opening connect while a dead session lingers
+        const stuckConnecting = isConnecting || isReconnecting
+          || status === 'connecting' || status === 'reconnecting';
+        if (opts.forceConnect || stuckConnecting) {
+          await hardReset();
         }
 
         if (typeof openConnectModal === 'function') {
@@ -221,15 +245,6 @@ function RainbowBridgeInner() {
       }
     };
 
-    const hardReset = async () => {
-      lastEmitted.current = '';
-      try {
-        await disconnectAsync?.();
-      } catch {
-        /* ignore */
-      }
-    };
-
     const api = {
       ready: true,
       projectId,
@@ -240,8 +255,8 @@ function RainbowBridgeInner() {
       openChainModal: () => openChainModal?.(),
       hardReset,
       disconnect: hardReset,
-      isConnected: () => Boolean(isConnected && address),
-      getAddress: () => address || null,
+      isConnected: () => Boolean(connectedRef.current || (isConnected && address)),
+      getAddress: () => addressRef.current || address || null,
       getStatus: () => status,
       _onConnected: window.VoodooRainbow?._onConnected || null,
     };

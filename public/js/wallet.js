@@ -247,7 +247,15 @@ window.VoodooWallet = (function () {
     let accounts;
     try {
       onStatus?.('requesting');
-      accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+      // WalletConnect / RainbowKit already authorized — prefer eth_accounts (no second prompt)
+      try {
+        accounts = await ethereum.request({ method: 'eth_accounts' });
+      } catch {
+        accounts = [];
+      }
+      if (!accounts?.length) {
+        accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+      }
       onStatus?.('connected');
     } catch (err) {
       throw mapRequestError(err, kind);
@@ -268,8 +276,17 @@ window.VoodooWallet = (function () {
       } catch (e) {
         console.warn('Chain switch attempt:', e?.message || e);
       }
-      if (chainId !== PULSE_CHAIN_ID && kind !== 'voodoo') {
+      /**
+       * Never throw for RainbowKit / WalletConnect here.
+       * WC often lands on mainnet first; failing the chain switch used to leave
+       * wagmi "connected" while the dapp never wired up → modal closed + cannot reopen.
+       * Injected MetaMask-style still gets a soft warning only.
+       */
+      if (chainId !== PULSE_CHAIN_ID && kind !== 'voodoo' && kind !== 'rainbow') {
         throw new Error('Please switch your wallet to PulseChain (chain ID 369) and try again.');
+      }
+      if (chainId !== PULSE_CHAIN_ID) {
+        console.warn('[VoodooWallet] Not on PulseChain yet (chain', chainId, ') — continuing; user can switch later.');
       }
     }
 
@@ -277,6 +294,7 @@ window.VoodooWallet = (function () {
     let signer;
     let userAddress = accounts[0];
     try {
+      // 'any' network: WalletConnect may not be on PulseChain immediately
       provider = new ethers.providers.Web3Provider(ethereum, 'any');
       if (kind === 'voodoo' || isVoodooProvider(ethereum)) {
         try {
@@ -367,39 +385,44 @@ window.VoodooWallet = (function () {
 
   /**
    * Open RainbowKit modal and resolve once a wallet connects.
-   * Always recoverable: failed WalletConnect / dismissed modal can reopen.
+   * Always recoverable after WalletConnect success/failure.
    */
   async function connectOther(onStatus) {
     onStatus?.('opening');
     const rk = await waitForRainbowReady();
 
-    // Already connected via RainbowKit — open account modal and reuse session
-    if (rk.isConnected?.() && activeProvider && activeWalletKind === 'rainbow') {
-      rk.openAccountModal?.();
-      return {
-        ethereum: activeProvider,
-        provider: new ethers.providers.Web3Provider(activeProvider, 'any'),
-        signer: new ethers.providers.Web3Provider(activeProvider, 'any').getSigner(),
-        userAddress: await new ethers.providers.Web3Provider(activeProvider, 'any').getSigner().getAddress().catch(() => rk.getAddress?.()),
-        walletKind: 'rainbow',
-      };
+    // Dapp already fully wired with Rainbow session — open account modal
+    if (activeProvider && activeWalletKind === 'rainbow' && rk.isConnected?.()) {
+      try {
+        await rk.openConnectModal?.({ mode: 'account' });
+      } catch {
+        rk.openAccountModal?.();
+      }
+      try {
+        const provider = new ethers.providers.Web3Provider(activeProvider, 'any');
+        const signer = provider.getSigner();
+        const userAddress = await signer.getAddress().catch(() => rk.getAddress?.());
+        return {
+          ethereum: activeProvider,
+          provider,
+          signer,
+          userAddress,
+          walletKind: 'rainbow',
+        };
+      } catch {
+        // Fall through to fresh connect if session is dead
+        clearActiveWallet();
+      }
     }
 
-    // Re-open path: clear stuck "connecting" then show modal again
+    // Re-open path while waiting for a wallet
     if (pendingRainbowConnect) {
       try {
-        await rk.openConnectModal?.();
+        await rk.openConnectModal?.({ mode: 'connect', forceConnect: false });
       } catch {
         /* ignore */
       }
       return pendingRainbowConnect;
-    }
-
-    // Hard-reset any half-open WC session so open works after a failed click
-    try {
-      await rk.hardReset?.();
-    } catch {
-      /* ignore */
     }
 
     pendingRainbowConnect = new Promise((resolve, reject) => {
@@ -427,6 +450,7 @@ window.VoodooWallet = (function () {
         if (settled) return;
         const detail = event?.detail || {};
         const provider = detail.provider;
+        const preAddress = detail.address;
         if (!provider) {
           cleanup();
           reject(new Error('Wallet connected but no provider was returned.'));
@@ -435,9 +459,20 @@ window.VoodooWallet = (function () {
         cleanup();
         try {
           onStatus?.('connected');
+          // Soft path for WC: pass address if eth_accounts is empty briefly
           const result = await connectWithProvider(provider, 'rainbow', onStatus);
+          if (!result.userAddress && preAddress) {
+            result.userAddress = preAddress;
+          }
           resolve(result);
         } catch (err) {
+          // If dapp wiring fails after WC session exists, reset so user can reopen
+          try {
+            await rk.hardReset?.();
+          } catch {
+            /* ignore */
+          }
+          clearActiveWallet();
           reject(mapRequestError(err, 'rainbow'));
         }
       }
@@ -448,9 +483,11 @@ window.VoodooWallet = (function () {
         reject(new Error(event?.detail?.message || 'Wallet connection failed.'));
       }
 
-      /** User dismissed modal — free UI so Other can open RainbowKit again */
+      /** User dismissed without connecting */
       function onModalClosed() {
         if (settled) return;
+        // If we already have an active provider, ignore late dismiss (WC success closes modal)
+        if (activeProvider && activeWalletKind === 'rainbow') return;
         cleanup();
         const err = new Error('Connection cancelled');
         err.code = 'ACTION_REJECTED';
@@ -462,7 +499,7 @@ window.VoodooWallet = (function () {
       window.addEventListener('voodoo:rainbow-modal-closed', onModalClosed);
 
       Promise.resolve()
-        .then(() => rk.openConnectModal?.())
+        .then(() => rk.openConnectModal?.({ mode: 'connect', forceConnect: true }))
         .then((opened) => {
           if (settled) return;
           if (opened === false) {
