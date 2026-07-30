@@ -346,21 +346,39 @@
     btn.dataset.bound = '1';
 
     btn.addEventListener('click', async () => {
+      // Already connected with Voodoo — do nothing (address shown on button)
       if (userAddress && window.VoodooWallet.getActiveWalletKind() === 'voodoo') return;
+
+      // Prevent double-fire while a request is in flight, but ALWAYS re-enable in finally
+      if (btn.dataset.connecting === '1') return;
+      btn.dataset.connecting = '1';
       btn.disabled = true;
-      // Label stays "Voodoo Wallet" while connecting (no intermediate texts)
       setVoodooBtnLabel(null);
 
       try {
+        // Drop any stale "connected" leftover so second click re-opens extension
+        if (!userAddress) {
+          window.VoodooWallet.clearActiveWallet?.();
+        }
         const result = await window.VoodooWallet.connectVoodoo();
         await onWalletConnected(result);
-        // markConnectedUi sets short address on the button
       } catch (err) {
         resetWalletUi();
         setVoodooBtnLabel(null);
-        // Remove any leftover debug banner from older builds
         document.getElementById('voodooConnectError')?.remove();
-        await showConnectError('Voodoo Wallet connection failed', err);
+        const quiet = err?.code === 4001
+          || err?.code === 'ACTION_REJECTED'
+          || /reject|denied|cancel/i.test(err?.message || '');
+        if (!quiet) {
+          await showConnectError('Voodoo Wallet connection failed', err);
+        }
+      } finally {
+        btn.dataset.connecting = '0';
+        // Re-enable unless we successfully connected as Voodoo
+        if (!(userAddress && window.VoodooWallet.getActiveWalletKind() === 'voodoo')) {
+          btn.disabled = false;
+          if (!userAddress) setVoodooBtnLabel(null);
+        }
       }
     });
   }

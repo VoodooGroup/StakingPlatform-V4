@@ -233,20 +233,69 @@ export function voodooWallet(_options = {}) {
               throw err;
             }
             cachedProvider = provider;
-            console.info('[VoodooWallet/RK] opening extension (eth_requestAccounts)…');
+            console.info('[VoodooWallet/RK] opening extension…');
 
-            // Explicitly open the extension popup before wagmi connect
+            /**
+             * Always re-prompt so a second click after close opens the extension again.
+             * wallet_requestPermissions forces a UI prompt when eth_requestAccounts alone
+             * is a no-op after a cancelled first attempt.
+             */
+            const openExtension = async () => {
+              try {
+                await provider.request({
+                  method: 'wallet_requestPermissions',
+                  params: [{ eth_accounts: {} }],
+                });
+              } catch (permErr) {
+                if (
+                  permErr?.code === 4001
+                  || /reject|denied/i.test(String(permErr?.message || ''))
+                ) {
+                  throw permErr;
+                }
+                // Method unsupported — fall through to eth_requestAccounts
+              }
+              return provider.request({ method: 'eth_requestAccounts' });
+            };
+
+            const withTimeout = (p, ms) =>
+              Promise.race([
+                p,
+                new Promise((_, reject) => {
+                  setTimeout(() => {
+                    const err = new Error(
+                      'Voodoo Wallet did not respond. Close any stuck popup, unlock the extension, try again.',
+                    );
+                    err.code = 'TIMEOUT';
+                    reject(err);
+                  }, ms);
+                }),
+              ]);
+
             try {
-              await provider.request({ method: 'eth_requestAccounts' });
+              await withTimeout(openExtension(), 90_000);
             } catch (e) {
-              // User reject → rethrow; other errors still try base.connect
               if (e?.code === 4001 || /reject|denied/i.test(String(e?.message || ''))) {
                 throw e;
               }
-              console.warn('[VoodooWallet/RK] eth_requestAccounts', e);
+              if (e?.code === 'TIMEOUT') throw e;
+              console.warn('[VoodooWallet/RK] openExtension', e);
             }
 
-            return base.connect(parameters);
+            try {
+              return await base.connect(parameters);
+            } catch (e) {
+              // If already authorized, base.connect may still succeed via eth_accounts
+              try {
+                const accounts = await provider.request({ method: 'eth_accounts' });
+                if (accounts?.length) {
+                  return base.connect(parameters);
+                }
+              } catch {
+                /* ignore */
+              }
+              throw e;
+            }
           },
 
           async isAuthorized() {

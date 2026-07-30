@@ -225,13 +225,61 @@ window.VoodooWallet = (function () {
     let accounts;
     try {
       onStatus?.('requesting');
-      try {
-        accounts = await ethereum.request({ method: 'eth_accounts' });
-      } catch {
-        accounts = [];
-      }
-      if (!accounts?.length) {
-        accounts = await ethereum.request({ method: 'eth_requestAccounts' });
+
+      /**
+       * Always re-open the extension UI for Voodoo.
+       * Skipping with eth_accounts (when empty/hanging) left second clicks dead:
+       * first eth_requestAccounts can hang if the user closed the popup without reject.
+       */
+      const requestOpen = async () => {
+        // Prefer permissions re-prompt when supported (forces popup again)
+        if (kind === 'voodoo') {
+          try {
+            await ethereum.request({
+              method: 'wallet_requestPermissions',
+              params: [{ eth_accounts: {} }],
+            });
+          } catch (permErr) {
+            // 4001 user reject → bubble up; method not supported → fall through
+            if (permErr?.code === 4001 || /reject|denied/i.test(String(permErr?.message || ''))) {
+              throw permErr;
+            }
+          }
+        }
+        return ethereum.request({ method: 'eth_requestAccounts' });
+      };
+
+      const withTimeout = (p, ms) =>
+        Promise.race([
+          p,
+          new Promise((_, reject) => {
+            setTimeout(() => {
+              const err = new Error(
+                kind === 'voodoo'
+                  ? 'Voodoo Wallet did not respond. Open the extension, unlock it, then try again.'
+                  : 'Wallet did not respond. Try again.',
+              );
+              err.code = 'VOODOO_TIMEOUT';
+              reject(err);
+            }, ms);
+          }),
+        ]);
+
+      if (kind === 'voodoo') {
+        // Always prompt — never short-circuit on eth_accounts
+        accounts = await withTimeout(requestOpen(), 90_000);
+      } else {
+        try {
+          accounts = await ethereum.request({ method: 'eth_accounts' });
+        } catch {
+          accounts = [];
+        }
+        if (!accounts?.length) {
+          accounts = await withTimeout(
+            ethereum.request({ method: 'eth_requestAccounts' }),
+            90_000,
+          );
+        }
       }
       onStatus?.('connected');
     } catch (err) {
