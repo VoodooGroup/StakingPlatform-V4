@@ -257,36 +257,37 @@
     btn.dataset.bound = '1';
 
     btn.addEventListener('click', async () => {
-      const kind = window.VoodooWallet.getActiveWalletKind();
-      // Already connected via RainbowKit — open account modal
-      if (userAddress && isOtherWalletKind(kind)) {
-        if (window.VoodooRainbow?.openAccountModal) {
-          window.VoodooRainbow.openAccountModal();
-        }
-        return;
-      }
-
-      // Never leave the button disabled — WC failures must still allow reopen
+      // Always keep button clickable — WalletConnect must never lock Other
       btn.disabled = false;
-      btn.textContent = 'Other';
+      btn.textContent = userAddress && isOtherWalletKind(window.VoodooWallet.getActiveWalletKind())
+        ? shortAddress(userAddress)
+        : 'Other';
+
       try {
         const result = await window.VoodooWallet.connectOther();
-        if (result) await onWalletConnected(result);
+        if (result?.userAddress) {
+          await onWalletConnected(result);
+        }
       } catch (err) {
         const quiet = err?.code === 'TIMEOUT'
           || err?.code === 4001
           || err?.code === 'ACTION_REJECTED'
-          || /timed out|cancelled|rejected|denied/i.test(err?.message || '');
-        // Soft cancel / WC dismiss — keep UI ready
+          || err?.code === 'restart'
+          || /timed out|cancelled|rejected|denied|restart/i.test(err?.message || '');
         if (quiet) {
           btn.disabled = false;
-          btn.textContent = 'Other';
+          if (!userAddress) btn.textContent = 'Other';
           return;
         }
-        // Real error — still allow reopen (do not hard-lock UI)
         console.error('Other wallet connect error', err);
+        // Ensure next click can open RainbowKit
+        try {
+          await window.VoodooRainbow?.hardReset?.();
+        } catch {
+          /* ignore */
+        }
         btn.disabled = false;
-        btn.textContent = 'Other';
+        if (!userAddress) btn.textContent = 'Other';
         await showConnectError('Connection failed', err);
       } finally {
         btn.disabled = false;

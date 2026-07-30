@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
   RainbowKitProvider,
   lightTheme,
@@ -61,7 +61,15 @@ function clientToEip1193(client) {
   };
 }
 
-function RainbowBridgeInner() {
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
+/**
+ * Holds the remount key so hardReset can rebuild RainbowKit after WalletConnect
+ * leaves wagmi in a state where openConnectModal is undefined.
+ */
+function RainbowBridgeInner({ remountKey, requestRemount }) {
   const { openConnectModal, connectModalOpen } = useConnectModal();
   const { openAccountModal } = useAccountModal();
   const { openChainModal } = useChainModal();
@@ -69,16 +77,25 @@ function RainbowBridgeInner() {
   const { data: connectorClient } = useConnectorClient();
   const { disconnectAsync } = useDisconnect();
   const { switchChainAsync } = useSwitchChain();
+
   const lastEmitted = useRef('');
   const wasModalOpen = useRef(false);
   const closeTimer = useRef(null);
-  // Live refs so openModalSafe never uses a stale isConnected after disconnect
+
+  // Always-latest function refs (avoid stale undefined openConnectModal after WC connect)
+  const openConnectRef = useRef(openConnectModal);
+  const openAccountRef = useRef(openAccountModal);
+  const disconnectRef = useRef(disconnectAsync);
   const connectedRef = useRef(false);
-  const addressRef = useRef(null);
+
+  useEffect(() => {
+    openConnectRef.current = openConnectModal;
+    openAccountRef.current = openAccountModal;
+    disconnectRef.current = disconnectAsync;
+  }, [openConnectModal, openAccountModal, disconnectAsync]);
 
   useEffect(() => {
     connectedRef.current = Boolean(isConnected && address);
-    addressRef.current = address || null;
   }, [isConnected, address]);
 
   const emitConnected = useCallback(async () => {
@@ -110,7 +127,6 @@ function RainbowBridgeInner() {
         walletKind: 'rainbow',
       };
 
-      // Notify dapp FIRST — before chain switch (switch can hang on WC)
       window.dispatchEvent(new CustomEvent('voodoo:rainbow-connected', { detail }));
       if (typeof window.VoodooRainbow?._onConnected === 'function') {
         try {
@@ -120,11 +136,10 @@ function RainbowBridgeInner() {
         }
       }
 
-      // Best-effort PulseChain after dapp is live
       if (switchChainAsync) {
         Promise.race([
           switchChainAsync({ chainId: pulseChain.id }),
-          new Promise((resolve) => setTimeout(resolve, 6000)),
+          sleep(6000),
         ]).catch((err) => {
           console.warn('[VoodooRainbow] switch to PulseChain deferred:', err?.message || err);
         });
@@ -150,16 +165,13 @@ function RainbowBridgeInner() {
     }
   }, [isConnected]);
 
-  /**
-   * Only fire "dismissed" when user closed WITHOUT connecting.
-   * On successful WC connect, modal closes with isConnected=true — do not treat as cancel.
-   */
   useEffect(() => {
     if (closeTimer.current) {
       clearTimeout(closeTimer.current);
       closeTimer.current = null;
     }
 
+    // Only treat as user-dismiss when never became connected
     if (wasModalOpen.current && !connectModalOpen && !isConnected) {
       closeTimer.current = setTimeout(() => {
         if (!connectedRef.current) {
@@ -167,12 +179,7 @@ function RainbowBridgeInner() {
             detail: { reason: 'dismissed' },
           }));
         }
-      }, 600);
-    }
-
-    // Successful connect closes the modal — tell dapp waiters we are done opening UI
-    if (wasModalOpen.current && !connectModalOpen && isConnected && address) {
-      // no modal-closed cancel event
+      }, 700);
     }
 
     wasModalOpen.current = Boolean(connectModalOpen);
@@ -180,6 +187,7 @@ function RainbowBridgeInner() {
     if (window.VoodooRainbow) {
       window.VoodooRainbow.connectModalOpen = Boolean(connectModalOpen);
       window.VoodooRainbow.status = status;
+      window.VoodooRainbow.wagmiConnected = Boolean(isConnected && address);
     }
 
     return () => {
@@ -191,48 +199,74 @@ function RainbowBridgeInner() {
   }, [connectModalOpen, isConnected, address, status]);
 
   useEffect(() => {
+    /**
+     * Wait until RainbowKit exposes openConnectModal again.
+     * After WC connects, openConnectModal is often undefined until disconnect + re-render.
+     */
+    async function waitForConnectOpener(maxMs = 2500) {
+      const start = Date.now();
+      while (Date.now() - start < maxMs) {
+        if (typeof openConnectRef.current === 'function') {
+          return openConnectRef.current;
+        }
+        await sleep(50);
+      }
+      return null;
+    }
+
     const hardReset = async () => {
       lastEmitted.current = '';
       connectedRef.current = false;
-      addressRef.current = null;
       try {
-        await disconnectAsync?.();
+        await disconnectRef.current?.();
       } catch {
         /* ignore */
       }
-      // Allow React/wagmi to settle
-      await new Promise((r) => setTimeout(r, 200));
+      await sleep(100);
+      // Remount RainbowKit tree so connect modal API is always fresh
+      requestRemount?.();
+      await sleep(150);
     };
 
     /**
-     * @param {{ mode?: 'auto'|'connect'|'account' }} [opts]
-     * - auto: account modal if fully connected, else connect modal
-     * - connect: always open connect list (disconnect first if needed)
-     * - account: open account modal if connected
+     * Always try to show a RainbowKit UI.
+     * forceConnect: disconnect + remount + open wallet list (fixes "Other won't open").
      */
     const openModalSafe = async (opts = {}) => {
-      const mode = opts.mode || 'auto';
+      const forceConnect = Boolean(opts.forceConnect || opts.mode === 'connect');
+      const wantAccount = opts.mode === 'account' && !forceConnect;
+
       try {
-        const liveConnected = connectedRef.current || (isConnected && address);
-
-        if (mode === 'account' || (mode === 'auto' && liveConnected && !opts.forceConnect)) {
-          if (liveConnected && openAccountModal) {
-            openAccountModal();
-            return true;
-          }
-        }
-
-        // Only reset when forced, stuck connecting, or opening connect while a dead session lingers
-        const stuckConnecting = isConnecting || isReconnecting
-          || status === 'connecting' || status === 'reconnecting';
-        if (opts.forceConnect || stuckConnecting) {
-          await hardReset();
-        }
-
-        if (typeof openConnectModal === 'function') {
-          openConnectModal();
+        if (wantAccount && connectedRef.current && typeof openAccountRef.current === 'function') {
+          openAccountRef.current();
           return true;
         }
+
+        if (forceConnect || isConnecting || isReconnecting || status === 'connecting') {
+          await hardReset();
+        } else if (connectedRef.current && typeof openAccountRef.current === 'function') {
+          // Default when session is live: account modal
+          openAccountRef.current();
+          return true;
+        }
+
+        let opener = await waitForConnectOpener(forceConnect ? 3000 : 1500);
+        if (!opener && !forceConnect) {
+          // One more nuclear attempt
+          await hardReset();
+          opener = await waitForConnectOpener(3000);
+        }
+        if (typeof opener === 'function') {
+          opener();
+          return true;
+        }
+
+        console.error('[VoodooRainbow] openConnectModal still unavailable after reset');
+        window.dispatchEvent(
+          new CustomEvent('voodoo:rainbow-error', {
+            detail: { message: 'Could not open wallet modal. Please refresh the page.' },
+          }),
+        );
         return false;
       } catch (err) {
         console.error('[VoodooRainbow] openConnectModal failed', err);
@@ -248,15 +282,16 @@ function RainbowBridgeInner() {
     const api = {
       ready: true,
       projectId,
+      remountKey,
       connectModalOpen: Boolean(connectModalOpen),
       status,
       openConnectModal: openModalSafe,
-      openAccountModal: () => openAccountModal?.(),
+      openAccountModal: () => openAccountRef.current?.(),
       openChainModal: () => openChainModal?.(),
       hardReset,
       disconnect: hardReset,
-      isConnected: () => Boolean(connectedRef.current || (isConnected && address)),
-      getAddress: () => addressRef.current || address || null,
+      isConnected: () => Boolean(connectedRef.current),
+      getAddress: () => address || null,
       getStatus: () => status,
       _onConnected: window.VoodooRainbow?._onConnected || null,
     };
@@ -264,26 +299,30 @@ function RainbowBridgeInner() {
     window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, api);
     window.dispatchEvent(new CustomEvent('voodoo:rainbow-ready'));
   }, [
-    openConnectModal,
-    openAccountModal,
+    remountKey,
+    requestRemount,
     openChainModal,
-    disconnectAsync,
-    isConnected,
     isConnecting,
     isReconnecting,
-    address,
     status,
     connectModalOpen,
+    address,
   ]);
 
   return null;
 }
 
 export default function App() {
+  const [remountKey, setRemountKey] = useState(0);
+  const requestRemount = useCallback(() => {
+    setRemountKey((k) => k + 1);
+  }, []);
+
   return (
-    <WagmiProvider config={config}>
+    <WagmiProvider config={config} key={`wagmi-${remountKey}`}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
+          key={`rk-${remountKey}`}
           theme={theme}
           modalSize="wide"
           initialChain={pulseChain}
@@ -293,7 +332,10 @@ export default function App() {
             learnMoreUrl: 'https://voodootoken.com',
           }}
         >
-          <RainbowBridgeInner />
+          <RainbowBridgeInner
+            remountKey={remountKey}
+            requestRemount={requestRemount}
+          />
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>
