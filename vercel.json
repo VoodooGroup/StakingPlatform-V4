@@ -1,6 +1,6 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "buildCommand": "node -e \"console.log('Static deploy: serving public/')\"",
+  "buildCommand": "npm run build:rainbow",
   "outputDirectory": "public",
   "rewrites": [
     {

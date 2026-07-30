@@ -36,8 +36,8 @@
     if (connectBtn) {
       connectBtn.disabled = false;
       connectBtn.classList.remove('is-connected');
-      connectBtn.textContent = 'MetaMask';
-      connectBtn.title = 'Connect with MetaMask';
+      connectBtn.textContent = 'Other';
+      connectBtn.title = 'Connect with MetaMask, WalletConnect, Coinbase, and more';
     }
 
     if (voodooBtn) {
@@ -46,6 +46,10 @@
       setVoodooBtnLabel(null);
       voodooBtn.title = 'Connect with Voodoo Wallet browser extension';
     }
+  }
+
+  function isOtherWalletKind(kind) {
+    return kind === 'rainbow' || kind === 'injected';
   }
 
   function markConnectedUi(kind, address) {
@@ -65,16 +69,17 @@
       if (connectBtn) {
         connectBtn.disabled = true;
         connectBtn.classList.remove('is-connected');
-        connectBtn.textContent = 'MetaMask';
+        connectBtn.textContent = 'Other';
         connectBtn.title = 'Already connected with Voodoo Wallet';
       }
       return;
     }
 
+    // RainbowKit / other wallets
     if (connectBtn) {
       connectBtn.disabled = false;
       connectBtn.classList.add('is-connected');
-      connectBtn.textContent = label || 'MetaMask';
+      connectBtn.textContent = label || 'Other';
       connectBtn.title = address ? `Connected: ${address}` : 'Connected';
     }
     if (voodooBtn) {
@@ -252,14 +257,41 @@
     btn.dataset.bound = '1';
 
     btn.addEventListener('click', async () => {
-      if (userAddress && window.VoodooWallet.getActiveWalletKind() === 'injected') return;
-      setButtonBusy(btn, 'Connecting...');
+      const kind = window.VoodooWallet.getActiveWalletKind();
+      // Already connected via RainbowKit — open account modal
+      if (userAddress && isOtherWalletKind(kind)) {
+        if (window.VoodooRainbow?.openAccountModal) {
+          window.VoodooRainbow.openAccountModal();
+        }
+        return;
+      }
+
+      // Keep button ENABLED so user can reopen if they closed the modal.
+      // connectOther() reuses an in-flight wait + re-opens the modal.
+      btn.textContent = 'Other';
       try {
-        const result = await window.VoodooWallet.connect();
-        await onWalletConnected(result);
+        const result = await window.VoodooWallet.connectOther();
+        if (result) await onWalletConnected(result);
       } catch (err) {
+        const quiet = err?.code === 'TIMEOUT'
+          || err?.code === 4001
+          || err?.code === 'ACTION_REJECTED'
+          || /timed out|cancelled|rejected|denied/i.test(err?.message || '');
+        // Soft cancel (closed modal) — keep UI ready for next click
+        if (quiet) {
+          if (!userAddress) {
+            btn.disabled = false;
+            btn.textContent = 'Other';
+          }
+          return;
+        }
         resetWalletUi();
         await showConnectError('Connection failed', err);
+      } finally {
+        if (!userAddress) {
+          btn.disabled = false;
+          btn.textContent = 'Other';
+        }
       }
     });
   }
@@ -315,9 +347,7 @@
     await updateAllAPYs();
 
     // Do NOT auto-connect on page load.
-    // Auto-clicking MetaMask/Voodoo when selectedAddress is set opened MetaMask
-    // unexpectedly whenever the staking page loaded.
-    // User must click "Voodoo Wallet" or "MetaMask" themselves.
+    // User must click "Voodoo Wallet" or "Other" (RainbowKit) themselves.
   }
 
   document.addEventListener('contextmenu', (e) => e.preventDefault());

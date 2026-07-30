@@ -13,9 +13,8 @@ export default function Header({
   const voodooLabel = walletKind === 'voodoo' && isConnected && address
     ? shortAddress(address)
     : 'Voodoo Wallet';
-  const injectedLabel = walletKind === 'injected' && isConnected && address
-    ? shortAddress(address)
-    : 'MetaMask';
+  const otherConnected = isConnected && (walletKind === 'rainbow' || walletKind === 'injected');
+  const otherLabel = otherConnected && address ? shortAddress(address) : 'Other';
 
   return (
     <nav className="flex items-center justify-between p-4 shadow-md bg-white">
@@ -45,11 +44,11 @@ export default function Header({
         <button
           type="button"
           onClick={onConnect}
-          disabled={isConnected && walletKind !== 'injected'}
+          disabled={isConnected && !otherConnected}
           className="inline-flex items-center justify-center w-[10.5rem] h-10 shrink-0 bg-blue-800 hover:bg-blue-700 text-white text-sm font-semibold font-mono rounded transition duration-300 ease-in-out disabled:opacity-90"
-          title="Connect with MetaMask or another browser wallet"
+          title="Connect with MetaMask, WalletConnect, Coinbase, and more (RainbowKit)"
         >
-          {injectedLabel}
+          {otherLabel}
         </button>
       </div>
     </nav>

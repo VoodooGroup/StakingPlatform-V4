@@ -16,7 +16,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/staking.css?v=28" />
+  <link rel="stylesheet" href="/css/staking.css?v=38" />
+  <link rel="stylesheet" href="/js/rainbow-bridge.css?v=38" />
 </head>
 <body class="flex flex-col">
 
@@ -41,11 +42,14 @@
       <button
         type="button"
         id="connectBtn"
-        class="wallet-btn wallet-btn-injected"
-        title="Connect with MetaMask"
-      >MetaMask</button>
+        class="wallet-btn wallet-btn-other"
+        title="Connect with MetaMask, WalletConnect, Coinbase, and more"
+      >Other</button>
     </div>
   </nav>
+
+  <!-- RainbowKit React island (modals portal to body) -->
+  <div id="rainbowkit-root"></div>
 
   <div class="flex justify-center mt-6 mb-4">
     <img data-sp4="flowIcons" src="/icons.png" alt="Staking flow" class="w-64 h-auto" style="background:transparent" />
@@ -104,18 +108,20 @@
     </div>
   </div>
 
-  <script src="/js/config.js?v=28"></script>
-  <script src="/js/ui.js?v=28"></script>
-  <script src="/js/StakingPlatformV4.js?v=28"></script>
-  <script src="/js/stakingAbi.js?v=28"></script>
-  <script src="/js/contracts.js?v=28"></script>
-  <script src="/js/wallet.js?v=28"></script>
-  <script src="/js/apy.js?v=28"></script>
-  <script src="/js/calculator.js?v=28"></script>
-  <script src="/js/pools.js?v=28"></script>
-  <script src="/js/poolRenderer.js?v=28"></script>
-  <script src="/js/activeSince.js?v=28"></script>
-  <script src="/js/app.js?v=28"></script>
+  <script src="/js/config.js?v=38"></script>
+  <script src="/js/ui.js?v=38"></script>
+  <script src="/js/StakingPlatformV4.js?v=38"></script>
+  <script src="/js/stakingAbi.js?v=38"></script>
+  <script src="/js/contracts.js?v=38"></script>
+  <script src="/js/wallet.js?v=38"></script>
+  <script src="/js/apy.js?v=38"></script>
+  <script src="/js/calculator.js?v=38"></script>
+  <script src="/js/pools.js?v=38"></script>
+  <script src="/js/poolRenderer.js?v=38"></script>
+  <script src="/js/activeSince.js?v=38"></script>
+  <script src="/js/app.js?v=38"></script>
+  <!-- RainbowKit multi-wallet modal (loads after wallet.js) -->
+  <script src="/js/rainbow-bridge.js?v=38" defer></script>
   <script>
     (function () {
       var modal = document.getElementById('calculatorModal');

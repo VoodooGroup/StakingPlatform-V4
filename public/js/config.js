@@ -47,7 +47,13 @@ function resolveStakingAddress(candidate) {
 
 window.VoodooConfig = {
   PLATFORM_MAP: 'StakingPlatformV4',
-  ASSET_VERSION: '28',
+  ASSET_VERSION: '38',
+  /**
+   * WalletConnect / Reown Cloud project id (https://cloud.reown.com).
+   * Leave empty to use the RainbowKit build-time default.
+   * For production, set your own id here OR VITE_WC_PROJECT_ID when building rainbow-bridge.
+   */
+  WC_PROJECT_ID: '',
   VDO_ADDRESS: window.VoodooAddresses.VDO,
   /** Always V4 — getter so nothing can permanently stick a wrong value */
   get STAKING_ADDRESS() {

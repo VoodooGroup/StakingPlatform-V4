@@ -1,0 +1,25 @@
+{
+  "name": "voodoo-rainbow-bridge",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@rainbow-me/rainbowkit": "^2.2.8",
+    "@tanstack/query-core": "^5.66.9",
+    "@tanstack/react-query": "^5.66.9",
+    "@wagmi/core": "^2.16.5",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "viem": "^2.23.2",
+    "wagmi": "^2.14.12"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.1.0"
+  }
+}

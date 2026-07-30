@@ -5,8 +5,9 @@
   "scripts": {
     "serve": "powershell -NoProfile -ExecutionPolicy Bypass -File serve.ps1",
     "dev": "next dev",
-    "build": "next build",
-    "vercel-build": "node -e \"console.log('Deploying static site from public/')\"",
+    "build": "npm run build:rainbow",
+    "build:rainbow": "npm --prefix rainbow-bridge install && npm --prefix rainbow-bridge run build",
+    "vercel-build": "npm run build:rainbow",
     "start": "next start",
     "lint": "next lint"
   },
