@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import {
   RainbowKitProvider,
   lightTheme,
@@ -36,6 +36,10 @@ theme.colors.generalBorder = 'rgba(15, 23, 42, 0.10)';
 theme.colors.connectButtonBackground = '#ffffff';
 theme.colors.connectButtonInnerBackground = '#f8fafc';
 
+function sleep(ms) {
+  return new Promise((r) => setTimeout(r, ms));
+}
+
 function clientToEip1193(client) {
   if (!client) return null;
   const transport = client.transport;
@@ -61,19 +65,18 @@ function clientToEip1193(client) {
   };
 }
 
-function sleep(ms) {
-  return new Promise((r) => setTimeout(r, ms));
-}
-
 /**
- * Holds the remount key so hardReset can rebuild RainbowKit after WalletConnect
- * leaves wagmi in a state where openConnectModal is undefined.
+ * Simple, reliable bridge — NO remount of Wagmi/RainbowKit (that broke opening).
+ *
+ * openConnectModal from RainbowKit is only defined when disconnected.
+ * After WalletConnect, we disconnect first, wait for React to re-render,
+ * then call the fresh openConnectModal.
  */
-function RainbowBridgeInner({ remountKey, requestRemount }) {
+function RainbowBridgeInner() {
   const { openConnectModal, connectModalOpen } = useConnectModal();
   const { openAccountModal } = useAccountModal();
   const { openChainModal } = useChainModal();
-  const { address, isConnected, status, connector, isConnecting, isReconnecting } = useAccount();
+  const { address, isConnected, status, connector } = useAccount();
   const { data: connectorClient } = useConnectorClient();
   const { disconnectAsync } = useDisconnect();
   const { switchChainAsync } = useSwitchChain();
@@ -81,12 +84,12 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
   const lastEmitted = useRef('');
   const wasModalOpen = useRef(false);
   const closeTimer = useRef(null);
-
-  // Always-latest function refs (avoid stale undefined openConnectModal after WC connect)
   const openConnectRef = useRef(openConnectModal);
   const openAccountRef = useRef(openAccountModal);
   const disconnectRef = useRef(disconnectAsync);
   const connectedRef = useRef(false);
+  /** After disconnect, open the connect modal once hooks update */
+  const pendingOpenConnect = useRef(false);
 
   useEffect(() => {
     openConnectRef.current = openConnectModal;
@@ -97,6 +100,23 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
   useEffect(() => {
     connectedRef.current = Boolean(isConnected && address);
   }, [isConnected, address]);
+
+  // Fulfill "open connect after disconnect" without remounting
+  useEffect(() => {
+    if (!pendingOpenConnect.current) return;
+    if (isConnected) return;
+    if (typeof openConnectModal !== 'function') return;
+    pendingOpenConnect.current = false;
+    // Next tick so RainbowKit internal modal state is ready
+    const t = setTimeout(() => {
+      try {
+        openConnectModal();
+      } catch (e) {
+        console.error('[VoodooRainbow] deferred open failed', e);
+      }
+    }, 50);
+    return () => clearTimeout(t);
+  }, [isConnected, openConnectModal, status]);
 
   const emitConnected = useCallback(async () => {
     if (!isConnected || !address) return;
@@ -110,10 +130,7 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
         }
       }
       if (!eip1193) eip1193 = clientToEip1193(connectorClient);
-      if (!eip1193) {
-        console.warn('[VoodooRainbow] connected but no EIP-1193 provider yet');
-        return;
-      }
+      if (!eip1193) return;
 
       const key = `${address}:${connector?.id || 'unknown'}`;
       if (lastEmitted.current === key) return;
@@ -140,9 +157,7 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
         Promise.race([
           switchChainAsync({ chainId: pulseChain.id }),
           sleep(6000),
-        ]).catch((err) => {
-          console.warn('[VoodooRainbow] switch to PulseChain deferred:', err?.message || err);
-        });
+        ]).catch(() => {});
       }
     } catch (err) {
       console.error('[VoodooRainbow] emit connected failed', err);
@@ -171,7 +186,6 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
       closeTimer.current = null;
     }
 
-    // Only treat as user-dismiss when never became connected
     if (wasModalOpen.current && !connectModalOpen && !isConnected) {
       closeTimer.current = setTimeout(() => {
         if (!connectedRef.current) {
@@ -179,7 +193,7 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
             detail: { reason: 'dismissed' },
           }));
         }
-      }, 700);
+      }, 800);
     }
 
     wasModalOpen.current = Boolean(connectModalOpen);
@@ -199,90 +213,88 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
   }, [connectModalOpen, isConnected, address, status]);
 
   useEffect(() => {
-    /**
-     * Wait until RainbowKit exposes openConnectModal again.
-     * After WC connects, openConnectModal is often undefined until disconnect + re-render.
-     */
-    async function waitForConnectOpener(maxMs = 2500) {
-      const start = Date.now();
-      while (Date.now() - start < maxMs) {
-        if (typeof openConnectRef.current === 'function') {
-          return openConnectRef.current;
-        }
-        await sleep(50);
-      }
-      return null;
-    }
-
     const hardReset = async () => {
       lastEmitted.current = '';
       connectedRef.current = false;
+      pendingOpenConnect.current = false;
       try {
         await disconnectRef.current?.();
       } catch {
         /* ignore */
       }
-      await sleep(100);
-      // Remount RainbowKit tree so connect modal API is always fresh
-      requestRemount?.();
       await sleep(150);
     };
 
     /**
-     * Always try to show a RainbowKit UI.
-     * forceConnect: disconnect + remount + open wallet list (fixes "Other won't open").
+     * Open RainbowKit UI.
+     * - mode 'account': account modal if connected
+     * - forceConnect / mode 'connect': disconnect if needed, then open wallet list
+     * - default: account if connected, else wallet list
      */
     const openModalSafe = async (opts = {}) => {
       const forceConnect = Boolean(opts.forceConnect || opts.mode === 'connect');
-      const wantAccount = opts.mode === 'account' && !forceConnect;
+      const wantAccount = opts.mode === 'account';
 
       try {
-        if (wantAccount && connectedRef.current && typeof openAccountRef.current === 'function') {
-          openAccountRef.current();
-          return true;
+        // Account only
+        if (wantAccount && connectedRef.current) {
+          if (typeof openAccountRef.current === 'function') {
+            openAccountRef.current();
+            return true;
+          }
         }
 
-        if (forceConnect || isConnecting || isReconnecting || status === 'connecting') {
+        // Already connected and not forcing new connect → account modal
+        if (!forceConnect && connectedRef.current) {
+          if (typeof openAccountRef.current === 'function') {
+            openAccountRef.current();
+            return true;
+          }
+        }
+
+        // Need connect modal. openConnectModal is only available when disconnected.
+        if (connectedRef.current || status === 'connecting' || status === 'reconnecting') {
+          pendingOpenConnect.current = true;
           await hardReset();
-        } else if (connectedRef.current && typeof openAccountRef.current === 'function') {
-          // Default when session is live: account modal
-          openAccountRef.current();
+          // Effect above will open when openConnectModal returns
+          // Fallback poll in case effect misses
+          for (let i = 0; i < 40; i++) {
+            await sleep(50);
+            if (typeof openConnectRef.current === 'function' && !connectedRef.current) {
+              pendingOpenConnect.current = false;
+              openConnectRef.current();
+              return true;
+            }
+          }
+          pendingOpenConnect.current = false;
+          return false;
+        }
+
+        // Already disconnected — open immediately
+        if (typeof openConnectRef.current === 'function') {
+          openConnectRef.current();
           return true;
         }
 
-        let opener = await waitForConnectOpener(forceConnect ? 3000 : 1500);
-        if (!opener && !forceConnect) {
-          // One more nuclear attempt
-          await hardReset();
-          opener = await waitForConnectOpener(3000);
+        // Soft wait for hook
+        for (let i = 0; i < 20; i++) {
+          await sleep(50);
+          if (typeof openConnectRef.current === 'function') {
+            openConnectRef.current();
+            return true;
+          }
         }
-        if (typeof opener === 'function') {
-          opener();
-          return true;
-        }
-
-        console.error('[VoodooRainbow] openConnectModal still unavailable after reset');
-        window.dispatchEvent(
-          new CustomEvent('voodoo:rainbow-error', {
-            detail: { message: 'Could not open wallet modal. Please refresh the page.' },
-          }),
-        );
         return false;
       } catch (err) {
-        console.error('[VoodooRainbow] openConnectModal failed', err);
-        window.dispatchEvent(
-          new CustomEvent('voodoo:rainbow-error', {
-            detail: { message: err?.message || String(err) },
-          }),
-        );
+        console.error('[VoodooRainbow] open failed', err);
+        pendingOpenConnect.current = false;
         return false;
       }
     };
 
-    const api = {
+    window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
       ready: true,
       projectId,
-      remountKey,
       connectModalOpen: Boolean(connectModalOpen),
       status,
       openConnectModal: openModalSafe,
@@ -294,35 +306,24 @@ function RainbowBridgeInner({ remountKey, requestRemount }) {
       getAddress: () => address || null,
       getStatus: () => status,
       _onConnected: window.VoodooRainbow?._onConnected || null,
-    };
-
-    window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, api);
+    });
     window.dispatchEvent(new CustomEvent('voodoo:rainbow-ready'));
   }, [
-    remountKey,
-    requestRemount,
     openChainModal,
-    isConnecting,
-    isReconnecting,
-    status,
     connectModalOpen,
+    status,
     address,
+    isConnected,
   ]);
 
   return null;
 }
 
 export default function App() {
-  const [remountKey, setRemountKey] = useState(0);
-  const requestRemount = useCallback(() => {
-    setRemountKey((k) => k + 1);
-  }, []);
-
   return (
-    <WagmiProvider config={config} key={`wagmi-${remountKey}`}>
+    <WagmiProvider config={config}>
       <QueryClientProvider client={queryClient}>
         <RainbowKitProvider
-          key={`rk-${remountKey}`}
           theme={theme}
           modalSize="wide"
           initialChain={pulseChain}
@@ -332,10 +333,7 @@ export default function App() {
             learnMoreUrl: 'https://voodootoken.com',
           }}
         >
-          <RainbowBridgeInner
-            remountKey={remountKey}
-            requestRemount={requestRemount}
-          />
+          <RainbowBridgeInner />
         </RainbowKitProvider>
       </QueryClientProvider>
     </WagmiProvider>

@@ -385,42 +385,43 @@ window.VoodooWallet = (function () {
   }
 
   /**
-   * Open RainbowKit. Always recoverable after WalletConnect.
-   *
-   * Critical: after WC connects, RainbowKit hides openConnectModal.
-   * We hard-reset + remount so Other can always open the wallet list again.
+   * Open RainbowKit wallet modal and resolve when a wallet connects.
+   * First open: just open the list (no heavy reset).
+   * Reopen after WC: disconnect then open (openConnectModal only works when disconnected).
    */
   async function connectOther(onStatus) {
     onStatus?.('opening');
     const rk = await waitForRainbowReady();
 
-    // Fully wired session → account modal (disconnect / switch)
+    // Dapp already has a live rainbow session → account modal
     if (activeProvider && activeWalletKind === 'rainbow') {
       try {
-        const opened = await rk.openConnectModal?.({ mode: 'account' });
-        if (opened !== false) {
-          const provider = new ethers.providers.Web3Provider(activeProvider, 'any');
-          const signer = provider.getSigner();
-          const userAddress = await signer.getAddress().catch(() => rk.getAddress?.());
-          if (userAddress) {
-            return {
-              ethereum: activeProvider,
-              provider,
-              signer,
-              userAddress,
-              walletKind: 'rainbow',
-            };
-          }
+        await rk.openConnectModal?.({ mode: 'account' });
+        const provider = new ethers.providers.Web3Provider(activeProvider, 'any');
+        const signer = provider.getSigner();
+        const userAddress = await signer.getAddress().catch(() => rk.getAddress?.());
+        if (userAddress) {
+          return {
+            ethereum: activeProvider,
+            provider,
+            signer,
+            userAddress,
+            walletKind: 'rainbow',
+          };
         }
       } catch {
-        /* fall through to force reconnect */
+        clearActiveWallet();
       }
-      clearActiveWallet();
     }
 
-    // Cancel any stuck waiter from a previous WC attempt
+    // Already waiting — just re-open modal (do not cancel WC QR mid-flow)
     if (pendingRainbowConnect) {
-      cancelPendingRainbow('restart');
+      try {
+        await rk.openConnectModal?.({ mode: 'connect', forceConnect: false });
+      } catch {
+        /* ignore */
+      }
+      return pendingRainbowConnect;
     }
 
     const epoch = ++connectEpoch;
@@ -428,6 +429,7 @@ window.VoodooWallet = (function () {
     pendingRainbowConnect = new Promise((resolve, reject) => {
       let settled = false;
       pendingReject = reject;
+      let sawConnected = false;
 
       const cleanup = () => {
         settled = true;
@@ -448,6 +450,7 @@ window.VoodooWallet = (function () {
 
       async function onConnected(event) {
         if (settled || epoch !== connectEpoch) return;
+        sawConnected = true;
         const detail = event?.detail || {};
         const provider = detail.provider;
         const preAddress = detail.address;
@@ -463,12 +466,12 @@ window.VoodooWallet = (function () {
           if (!result.userAddress && preAddress) result.userAddress = preAddress;
           resolve(result);
         } catch (err) {
+          clearActiveWallet();
           try {
             await window.VoodooRainbow?.hardReset?.();
           } catch {
             /* ignore */
           }
-          clearActiveWallet();
           reject(mapRequestError(err, 'rainbow'));
         }
       }
@@ -481,33 +484,34 @@ window.VoodooWallet = (function () {
 
       function onModalClosed() {
         if (settled || epoch !== connectEpoch) return;
-        // Success path: modal closes when connected — wait for rainbow-connected instead
-        if (activeProvider && activeWalletKind === 'rainbow') return;
-        if (window.VoodooRainbow?.isConnected?.()) return;
-        // Give emitConnected a moment after WC success (modal closes first)
+        if (sawConnected || activeProvider) return;
+        // Modal may close a moment before rainbow-connected fires (WC success)
         setTimeout(() => {
-          if (settled || epoch !== connectEpoch) return;
-          if (activeProvider && activeWalletKind === 'rainbow') return;
+          if (settled || epoch !== connectEpoch || sawConnected || activeProvider) return;
           if (window.VoodooRainbow?.isConnected?.()) return;
           cleanup();
           const err = new Error('Connection cancelled');
           err.code = 'ACTION_REJECTED';
           reject(err);
-        }, 900);
+        }, 1200);
       }
 
       window.addEventListener('voodoo:rainbow-connected', onConnected);
       window.addEventListener('voodoo:rainbow-error', onError);
       window.addEventListener('voodoo:rainbow-modal-closed', onModalClosed);
 
-      // Always force a clean connect modal (remounts RK if needed)
+      // First open: forceConnect only if wagmi thinks it is already connected
+      const force = Boolean(rk.isConnected?.() || rk.wagmiConnected);
       Promise.resolve()
-        .then(() => rk.openConnectModal?.({ mode: 'connect', forceConnect: true }))
+        .then(() => rk.openConnectModal?.({
+          mode: 'connect',
+          forceConnect: force,
+        }))
         .then((opened) => {
           if (settled || epoch !== connectEpoch) return;
           if (opened === false) {
             cleanup();
-            reject(new Error('Could not open wallet modal. Please refresh the page.'));
+            reject(new Error('Could not open wallet modal. Please refresh the page (Ctrl+F5).'));
           }
         })
         .catch((err) => {
