@@ -301,18 +301,19 @@ input.amount-needs-value {
 footer p { font-size: 20px !important; }
 footer a { font-size: 30px !important; }
 #connectBtn,
-#voodooWalletBtn { cursor: pointer; }
+#voodooWalletBtn,
+#walletConnectBtn { cursor: pointer; }
 #openCalculator { cursor: pointer; }
 
 .wallet-actions {
   display: flex;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: flex-end;
   gap: 0.5rem;
 }
 
-/* Same fixed size for both buttons so labels never resize the layout */
+/* Fixed button size so labels never resize the layout */
 .wallet-btn {
   display: inline-flex;
   align-items: center;
@@ -351,7 +352,7 @@ footer a { font-size: 30px !important; }
   background: #0a4a61;
 }
 
-/* "Other" — opens RainbowKit (MetaMask, WalletConnect, Coinbase, …) */
+/* "Other" — RainbowKit browser wallets only */
 .wallet-btn-injected,
 .wallet-btn-other {
   background: #1e40af;
@@ -359,6 +360,17 @@ footer a { font-size: 30px !important; }
 .wallet-btn-injected:hover:not(:disabled),
 .wallet-btn-other:hover:not(:disabled) {
   background: #1d4ed8;
+}
+
+/* Standalone WalletConnect QR (does not use RainbowKit modal) */
+.wallet-btn-wc {
+  background: #3b99fc;
+}
+.wallet-btn-wc:hover:not(:disabled) {
+  background: #2b7fd4;
+}
+.wallet-btn-wc.is-connected {
+  background: #2563eb;
 }
 
 /* RainbowKit mount only — do NOT restyle [data-rk] internals (breaks wallet steps) */

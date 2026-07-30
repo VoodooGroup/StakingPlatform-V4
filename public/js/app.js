@@ -32,12 +32,13 @@
   function resetConnectButtons() {
     const connectBtn = document.getElementById('connectBtn');
     const voodooBtn = document.getElementById('voodooWalletBtn');
+    const wcBtn = document.getElementById('walletConnectBtn');
 
     if (connectBtn) {
       connectBtn.disabled = false;
       connectBtn.classList.remove('is-connected');
       connectBtn.textContent = 'Other';
-      connectBtn.title = 'Connect with MetaMask, WalletConnect, Coinbase, and more';
+      connectBtn.title = 'Browser wallets: MetaMask, Rabby, Trust, OKX, and more';
     }
 
     if (voodooBtn) {
@@ -45,6 +46,13 @@
       voodooBtn.classList.remove('is-connected');
       setVoodooBtnLabel(null);
       voodooBtn.title = 'Connect with Voodoo Wallet browser extension';
+    }
+
+    if (wcBtn) {
+      wcBtn.disabled = false;
+      wcBtn.classList.remove('is-connected');
+      wcBtn.textContent = 'WalletConnect';
+      wcBtn.title = 'WalletConnect (mobile QR)';
     }
   }
 
@@ -55,6 +63,7 @@
   function markConnectedUi(kind, address) {
     const connectBtn = document.getElementById('connectBtn');
     const voodooBtn = document.getElementById('voodooWalletBtn');
+    const wcBtn = document.getElementById('walletConnectBtn');
     const label = shortAddress(address);
 
     if (kind === 'voodoo') {
@@ -72,15 +81,41 @@
         connectBtn.textContent = 'Other';
         connectBtn.title = 'Already connected with Voodoo Wallet';
       }
+      if (wcBtn) {
+        wcBtn.disabled = true;
+        wcBtn.classList.remove('is-connected');
+        wcBtn.textContent = 'WalletConnect';
+      }
       return;
     }
 
-    // RainbowKit / other wallets
-    if (connectBtn) {
-      connectBtn.disabled = false;
-      connectBtn.classList.add('is-connected');
-      connectBtn.textContent = label || 'Other';
-      connectBtn.title = address ? `Connected: ${address}` : 'Connected';
+    // RainbowKit (Other) or standalone WalletConnect
+    const connectedViaStandaloneWc = window.VoodooRainbow?.lastConnectorId === 'walletConnect-standalone';
+
+    if (connectedViaStandaloneWc) {
+      if (wcBtn) {
+        wcBtn.disabled = false;
+        wcBtn.classList.add('is-connected');
+        wcBtn.textContent = label || 'WalletConnect';
+        wcBtn.title = address ? `Connected: ${address}` : 'Connected';
+      }
+      if (connectBtn) {
+        connectBtn.disabled = true;
+        connectBtn.classList.remove('is-connected');
+        connectBtn.textContent = 'Other';
+      }
+    } else {
+      if (connectBtn) {
+        connectBtn.disabled = false;
+        connectBtn.classList.add('is-connected');
+        connectBtn.textContent = label || 'Other';
+        connectBtn.title = address ? `Connected: ${address}` : 'Connected';
+      }
+      if (wcBtn) {
+        wcBtn.disabled = true;
+        wcBtn.classList.remove('is-connected');
+        wcBtn.textContent = 'WalletConnect';
+      }
     }
     if (voodooBtn) {
       voodooBtn.disabled = true;
@@ -257,67 +292,92 @@
     btn.dataset.bound = '1';
 
     btn.addEventListener('click', async () => {
-      // Never disable — WalletConnect must not lock this button
       btn.disabled = false;
 
-      const kind = window.VoodooWallet.getActiveWalletKind();
-      if (userAddress && isOtherWalletKind(kind)) {
+      // Already connected via Other (browser wallet) → account modal
+      if (userAddress && isOtherWalletKind(window.VoodooWallet.getActiveWalletKind())
+        && window.VoodooRainbow?.lastConnectorId !== 'walletConnect-standalone') {
         btn.textContent = shortAddress(userAddress);
-        // Open account modal; if that fails, force wallet list
         try {
-          const ok = await window.VoodooRainbow?.openConnectModal?.({ mode: 'account' });
-          if (ok === false) {
-            await window.VoodooRainbow?.openConnectModal?.({ forceConnect: true });
-          }
+          await window.VoodooRainbow?.openConnectModal?.({ mode: 'account' });
         } catch (e) {
           console.warn(e);
-          try {
-            await window.VoodooRainbow?.openConnectModal?.({ forceConnect: true });
-          } catch {
-            /* ignore */
-          }
         }
         return;
       }
 
       btn.textContent = 'Other';
-
-      // 1) Open modal first (must work even after failed WC)
       try {
-        const opened = await window.VoodooRainbow?.openConnectModal?.({
-          mode: 'connect',
-          forceConnect: true,
-        });
+        const opened = await window.VoodooRainbow?.openConnectModal?.({ mode: 'connect' });
         if (opened === false) {
           await showConnectError(
             'Could not open wallet list',
-            new Error('RainbowKit did not open. Wait 2 seconds and click Other again.'),
+            new Error('RainbowKit did not open. Refresh the page and try again.'),
           );
           return;
         }
       } catch (e) {
-        console.error(e);
         await showConnectError('Could not open wallet list', e);
         return;
       }
 
-      // 2) Wait for a wallet connection in the background (do not block reopen)
       try {
         const result = await window.VoodooWallet.connectOther();
         if (result?.userAddress) {
+          window.VoodooRainbow.lastConnectorId = result.connectorId || 'rainbowkit';
           await onWalletConnected(result);
         }
       } catch (err) {
         const quiet = err?.code === 'TIMEOUT'
           || err?.code === 4001
           || err?.code === 'ACTION_REJECTED'
-          || err?.code === 'restart'
-          || /timed out|cancelled|rejected|denied|restart/i.test(err?.message || '');
-        if (!quiet) {
-          console.error('Other wallet connect error', err);
-        }
-        // Leave UI free for next Other click
+          || /timed out|cancelled|rejected|denied/i.test(err?.message || '');
+        if (!quiet) console.error('Other wallet connect error', err);
         if (!userAddress) btn.textContent = 'Other';
+      }
+    });
+  }
+
+  /** Standalone WalletConnect QR — never opens RainbowKit (avoids modal lock) */
+  function bindWalletConnectButton() {
+    const btn = document.getElementById('walletConnectBtn');
+    if (!btn || btn.dataset.bound) return;
+    btn.dataset.bound = '1';
+
+    btn.addEventListener('click', async () => {
+      if (userAddress && window.VoodooRainbow?.lastConnectorId === 'walletConnect-standalone') {
+        // Already on WC — show short address only
+        return;
+      }
+
+      btn.disabled = false;
+      btn.textContent = 'WalletConnect';
+      try {
+        if (!window.VoodooRainbow?.openWalletConnect) {
+          throw new Error('WalletConnect is still loading. Wait a second and try again.');
+        }
+        const detail = await window.VoodooRainbow.openWalletConnect();
+        if (!detail?.provider) {
+          throw new Error('WalletConnect did not return a provider.');
+        }
+        window.VoodooRainbow.lastConnectorId = 'walletConnect-standalone';
+        const result = await window.VoodooWallet.connectWithProvider(
+          detail.provider,
+          'rainbow',
+        );
+        if (detail.address && !result.userAddress) {
+          result.userAddress = detail.address;
+        }
+        await onWalletConnected(result);
+      } catch (err) {
+        const quiet = err?.code === 4001
+          || err?.code === 'ACTION_REJECTED'
+          || /user rejected|rejected|cancelled|closed|denied/i.test(err?.message || '');
+        btn.disabled = false;
+        btn.textContent = 'WalletConnect';
+        if (quiet) return;
+        console.error('WalletConnect error', err);
+        await showConnectError('WalletConnect failed', err);
       }
     });
   }
@@ -349,6 +409,7 @@
 
   async function init() {
     bindConnectButton();
+    bindWalletConnectButton();
     bindVoodooWalletButton();
 
     try {

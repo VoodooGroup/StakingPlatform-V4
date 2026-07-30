@@ -5,13 +5,17 @@ import {
   lightTheme,
 } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { disconnect as wagmiDisconnect, getConnections, getAccount } from '@wagmi/core';
+import { disconnect as coreDisconnect, getConnections, getAccount } from '@wagmi/core';
 import {
   WagmiProvider,
   useAccount,
   useSwitchChain,
 } from 'wagmi';
 import { config, pulseChain, projectId } from './config';
+import {
+  connectWalletConnectStandalone,
+  disconnectWalletConnectStandalone,
+} from './walletConnectStandalone.js';
 
 const queryClient = new QueryClient();
 
@@ -37,8 +41,7 @@ function sleep(ms) {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-/** Remove WalletConnect / wagmi cached sessions that keep isConnected stuck true */
-function clearWalletSessions() {
+function clearWcStorage() {
   try {
     const kill = [];
     for (let i = 0; i < localStorage.length; i++) {
@@ -53,7 +56,6 @@ function clearWalletSessions() {
         || low.includes('@w3m')
         || low.includes('clientone')
         || low.includes('clienttwo')
-        || low.startsWith('rk-')
       ) {
         kill.push(k);
       }
@@ -70,16 +72,11 @@ function clearWalletSessions() {
   }
 }
 
-/**
- * Disconnect every active connection + clear WC storage.
- * This is what makes "Other" work again after WalletConnect.
- */
-async function killAllWalletSessions() {
+async function killWagmiSessions() {
   try {
-    const connections = getConnections(config);
-    for (const c of connections) {
+    for (const c of getConnections(config)) {
       try {
-        await wagmiDisconnect(config, { connector: c.connector });
+        await coreDisconnect(config, { connector: c.connector });
       } catch {
         /* ignore */
       }
@@ -88,42 +85,29 @@ async function killAllWalletSessions() {
     /* ignore */
   }
   try {
-    await wagmiDisconnect(config);
+    await coreDisconnect(config);
   } catch {
     /* ignore */
   }
-  clearWalletSessions();
+  clearWcStorage();
   await sleep(100);
-  // Second pass after storage clear
-  try {
-    const connections = getConnections(config);
-    for (const c of connections) {
-      try {
-        await wagmiDisconnect(config, { connector: c.connector });
-      } catch {
-        /* ignore */
-      }
-    }
-  } catch {
-    /* ignore */
-  }
-  await sleep(150);
 }
 
+/**
+ * RainbowKit = browser wallets only (MetaMask, Rabby, Trust, …).
+ * WalletConnect = separate standalone QR (never touches RK modal state).
+ */
 function RainbowBridgeInner() {
   const { address, isConnected, connector, status } = useAccount();
   const { switchChainAsync } = useSwitchChain();
-
   const lastEmitted = useRef('');
   const openConnectFn = useRef(null);
   const openAccountFn = useRef(null);
   const connectBtnRef = useRef(null);
-  const accountBtnRef = useRef(null);
 
-  // Sync wagmi connection → static staking dapp
+  // Injected wallets via RainbowKit → notify static dapp
   useEffect(() => {
     let cancelled = false;
-
     async function sync() {
       if (!isConnected || !address || !connector) {
         if (!isConnected) {
@@ -132,28 +116,27 @@ function RainbowBridgeInner() {
         }
         return;
       }
-
-      const key = `${address}:${connector.id || 'wc'}`;
+      const key = `${address}:${connector.id || 'x'}`;
       if (lastEmitted.current === key) return;
-
       try {
         let eip1193 = null;
         try {
           eip1193 = await connector.getProvider();
-        } catch (e) {
-          console.warn('[VoodooRainbow] getProvider', e);
+        } catch {
+          /* ignore */
         }
         if (!eip1193 || cancelled) return;
-
         lastEmitted.current = key;
         const detail = {
           provider: eip1193,
           address,
-          connectorId: connector.id || null,
+          connectorId: connector.id,
           connectorName: connector.name || 'Wallet',
           walletKind: 'rainbow',
         };
-
+        if (window.VoodooRainbow) {
+          window.VoodooRainbow.lastConnectorId = connector.id || 'rainbowkit';
+        }
         window.dispatchEvent(new CustomEvent('voodoo:rainbow-connected', { detail }));
         if (typeof window.VoodooRainbow?._onConnected === 'function') {
           try {
@@ -162,73 +145,40 @@ function RainbowBridgeInner() {
             /* ignore */
           }
         }
-
         if (switchChainAsync) {
           Promise.race([
             switchChainAsync({ chainId: pulseChain.id }),
             sleep(5000),
           ]).catch(() => {});
         }
-      } catch (err) {
-        console.error('[VoodooRainbow] sync failed', err);
+      } catch (e) {
+        console.error('[VoodooRainbow] sync', e);
       }
     }
-
     sync();
     return () => {
       cancelled = true;
     };
   }, [isConnected, address, connector, switchChainAsync]);
 
-  /**
-   * Zombie session killer:
-   * If WalletConnect sets isConnected but the staking dapp never got a provider
-   * within 3s, kill the session so Other can open RainbowKit again.
-   */
-  useEffect(() => {
-    if (!isConnected || !address) return undefined;
-    const t = setTimeout(() => {
-      const dappLive = Boolean(window.VoodooWallet?.getActiveProvider?.());
-      if (!dappLive && getAccount(config).isConnected) {
-        console.warn('[VoodooRainbow] zombie WalletConnect session — clearing');
-        killAllWalletSessions().catch(() => {});
-        lastEmitted.current = '';
-      }
-    }, 3000);
-    return () => clearTimeout(t);
-  }, [isConnected, address]);
-
   const hardReset = useCallback(async () => {
     lastEmitted.current = '';
-    await killAllWalletSessions();
+    await disconnectWalletConnectStandalone().catch(() => {});
+    await killWagmiSessions();
   }, []);
 
-  /**
-   * Open wallet list. ALWAYS kills zombie WC first so openConnectModal exists.
-   */
-  const openConnectSafe = useCallback(async () => {
+  /** Open RainbowKit wallet list (browser wallets). Never used for WalletConnect. */
+  const openRainbowKit = useCallback(async () => {
     try {
-      // Always clear sessions before opening list — WC leaves isConnected=true
-      // which hides openConnectModal and locks the UI.
-      await killAllWalletSessions();
-
-      // Wait until ConnectButton re-renders in "disconnected" mode
-      for (let i = 0; i < 60; i++) {
-        await sleep(50);
-        const acc = getAccount(config);
-        if (!acc.isConnected && typeof openConnectFn.current === 'function') {
-          openConnectFn.current();
-          return true;
-        }
-        // DOM fallback
-        const el = document.getElementById('voodoo-rk-connect-btn');
-        if (el && !acc.isConnected) {
-          el.click();
-          return true;
+      // If a previous injected session is active, disconnect so connect modal works
+      if (getAccount(config).isConnected) {
+        await killWagmiSessions();
+        for (let i = 0; i < 40; i++) {
+          await sleep(40);
+          if (!getAccount(config).isConnected && typeof openConnectFn.current === 'function') break;
         }
       }
 
-      // Last resort: click whatever connect handler we have
       if (typeof openConnectFn.current === 'function') {
         openConnectFn.current();
         return true;
@@ -238,44 +188,52 @@ function RainbowBridgeInner() {
         el.click();
         return true;
       }
-
-      console.error('[VoodooRainbow] failed to open connect modal after killAllWalletSessions');
       return false;
-    } catch (err) {
-      console.error('[VoodooRainbow] openConnectSafe', err);
+    } catch (e) {
+      console.error('[VoodooRainbow] openRainbowKit', e);
       return false;
     }
   }, []);
 
-  const openAccountSafe = useCallback(async () => {
-    if (typeof openAccountFn.current === 'function' && isConnected) {
+  const openAccount = useCallback(() => {
+    if (typeof openAccountFn.current === 'function') {
       openAccountFn.current();
       return true;
     }
-    const el = document.getElementById('voodoo-rk-account-btn');
-    if (el && isConnected) {
-      el.click();
-      return true;
-    }
-    // Not connected → open connect list
-    return openConnectSafe();
-  }, [isConnected, openConnectSafe]);
+    return openRainbowKit();
+  }, [openRainbowKit]);
 
-  // Publish API for static portal
+  /** Standalone WalletConnect QR — does not open/close RainbowKit */
+  const openWalletConnect = useCallback(async () => {
+    try {
+      // Keep RainbowKit clean
+      await killWagmiSessions();
+      const detail = await connectWalletConnectStandalone();
+      return detail;
+    } catch (err) {
+      // User closed QR or connection failed — leave RK usable
+      console.warn('[VoodooRainbow] WalletConnect standalone', err?.message || err);
+      await disconnectWalletConnectStandalone().catch(() => {});
+      throw err;
+    }
+  }, []);
+
   useEffect(() => {
     window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
       ready: true,
       projectId,
       status,
       wagmiConnected: Boolean(isConnected && address),
+      /** Open browser-wallet modal (Other button) */
       openConnectModal: async (opts = {}) => {
         if (opts.mode === 'account' && isConnected && address) {
-          return openAccountSafe();
+          return openAccount();
         }
-        // forceConnect / default → always kill sessions + open list
-        return openConnectSafe();
+        return openRainbowKit();
       },
-      openAccountModal: openAccountSafe,
+      openAccountModal: openAccount,
+      /** Standalone WalletConnect QR (WalletConnect button) */
+      openWalletConnect,
       hardReset,
       disconnect: hardReset,
       isConnected: () => Boolean(isConnected && address),
@@ -284,7 +242,15 @@ function RainbowBridgeInner() {
       _onConnected: window.VoodooRainbow?._onConnected || null,
     });
     window.dispatchEvent(new CustomEvent('voodoo:rainbow-ready'));
-  }, [isConnected, address, status, openConnectSafe, openAccountSafe, hardReset]);
+  }, [
+    isConnected,
+    address,
+    status,
+    openRainbowKit,
+    openAccount,
+    openWalletConnect,
+    hardReset,
+  ]);
 
   return (
     <div
@@ -298,53 +264,33 @@ function RainbowBridgeInner() {
         top: 0,
         overflow: 'hidden',
         opacity: 0,
-        // pointer-events none would block .click() in some browsers — keep auto on host child
         pointerEvents: 'none',
       }}
     >
       <ConnectButton.Custom>
-        {({
-          account,
-          chain,
-          openAccountModal,
-          openChainModal,
-          openConnectModal,
-          mounted,
-        }) => {
-          // Always keep latest openers (even when connected)
+        {({ account, chain, openAccountModal, openConnectModal, openChainModal, mounted }) => {
           openConnectFn.current = typeof openConnectModal === 'function' ? openConnectModal : null;
           openAccountFn.current = typeof openAccountModal === 'function' ? openAccountModal : null;
-
-          const ready = mounted;
-          const connected = Boolean(ready && account && chain);
+          const connected = Boolean(mounted && account && chain);
 
           return (
-            <div style={{ display: 'flex', gap: 4, pointerEvents: 'auto' }}>
-              {/* ALWAYS mount connect button so we can click it after disconnect */}
+            <div style={{ pointerEvents: 'auto' }}>
               <button
                 ref={connectBtnRef}
                 type="button"
                 id="voodoo-rk-connect-btn"
-                onClick={() => {
-                  if (typeof openConnectModal === 'function') openConnectModal();
-                }}
+                onClick={() => openConnectModal?.()}
               >
                 Connect
               </button>
-              <button
-                ref={accountBtnRef}
-                type="button"
-                id="voodoo-rk-account-btn"
-                onClick={() => {
-                  if (typeof openAccountModal === 'function') openAccountModal();
-                }}
-                style={{ display: connected ? 'inline-block' : 'none' }}
-              >
-                Account
-              </button>
+              {connected ? (
+                <button type="button" onClick={() => openAccountModal?.()}>
+                  Account
+                </button>
+              ) : null}
               {connected && chain?.unsupported ? (
-                <button type="button" onClick={openChainModal}>
-                  Wrong network
+                <button type="button" onClick={() => openChainModal?.()}>
+                  Network
                 </button>
               ) : null}
             </div>

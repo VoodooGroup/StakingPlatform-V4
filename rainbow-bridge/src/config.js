@@ -1,7 +1,6 @@
 import { getDefaultConfig } from '@rainbow-me/rainbowkit';
 import {
   metaMaskWallet,
-  walletConnectWallet,
   rabbyWallet,
   trustWallet,
   ledgerWallet,
@@ -22,8 +21,8 @@ import { voodooWallet } from './voodooWallet.js';
 import { pulseWallet } from './pulseWallets.js';
 
 /**
- * WalletConnect / Reown Cloud project id.
- * https://cloud.reown.com — set VITE_WC_PROJECT_ID for production.
+ * WalletConnect / Reown Cloud project id (used by standalone WC button).
+ * https://cloud.reown.com
  */
 function resolveProjectId() {
   try {
@@ -40,11 +39,10 @@ function resolveProjectId() {
   } catch {
     /* ignore */
   }
-  // RainbowKit docs example project id
   return '21fef48091f12692cad574a6f7753643';
 }
 
-const projectId = resolveProjectId();
+export const projectId = resolveProjectId();
 
 const pulseRpc =
   (typeof import.meta !== 'undefined' && import.meta.env?.VITE_PULSE_RPC)
@@ -59,15 +57,15 @@ export const pulseChain = {
   },
 };
 
-const appName = 'Voodoo Staking Portal';
-const appDescription = 'Stake VDO on PulseChain — VoodooGroup';
-const appUrl = 'https://voodootoken.com';
-const appIcon = 'https://voodootoken.com/Voodoo-Token-Logo.png';
+export const appName = 'Voodoo Staking Portal';
+export const appDescription = 'Stake VDO on PulseChain — VoodooGroup';
+export const appUrl = 'https://voodootoken.com';
+export const appIcon = 'https://voodootoken.com/Voodoo-Token-Logo.png';
 
 /**
- * PulseChain-capable wallets.
- * pulseWallet() strips hanging QR getUri on extension wallets.
- * walletConnectWallet is NOT wrapped — needs getUri for the in-modal QR.
+ * RainbowKit wallets — NO walletConnectWallet here.
+ * WalletConnect is a separate standalone button (showQrModal) so it cannot
+ * lock / break the RainbowKit connect modal state.
  */
 const wallets = [
   {
@@ -77,7 +75,6 @@ const wallets = [
       pulseWallet(metaMaskWallet),
       pulseWallet(rabbyWallet),
       pulseWallet(trustWallet),
-      walletConnectWallet,
       pulseWallet(braveWallet),
       pulseWallet(okxWallet),
       pulseWallet(ledgerWallet),
@@ -98,10 +95,6 @@ const wallets = [
   },
 ];
 
-/**
- * Official RainbowKit config helper — wires WalletConnect correctly
- * (metadata, dual WC clients, showQrModal:false for in-modal QR).
- */
 export const config = getDefaultConfig({
   appName,
   appDescription,
@@ -116,19 +109,8 @@ export const config = getDefaultConfig({
   },
   ssr: false,
   multiInjectedProviderDiscovery: false,
-  // Do not pass showQrModal:true — RK must receive display_uri for its QR screen
-  walletConnectParameters: {
-    metadata: {
-      name: appName,
-      description: appDescription,
-      url: appUrl,
-      icons: [appIcon],
-    },
-  },
 });
 
-export { projectId, appName };
-
 if (typeof console !== 'undefined') {
-  console.info('[VoodooRainbow] getDefaultConfig | WC projectId:', `${projectId.slice(0, 8)}…`);
+  console.info('[VoodooRainbow] ready | WC standalone projectId:', `${projectId.slice(0, 8)}…`);
 }

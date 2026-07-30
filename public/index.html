@@ -16,8 +16,8 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/staking.css?v=44" />
-  <link rel="stylesheet" href="/js/rainbow-bridge.css?v=44" />
+  <link rel="stylesheet" href="/css/staking.css?v=45" />
+  <link rel="stylesheet" href="/js/rainbow-bridge.css?v=45" />
 </head>
 <body class="flex flex-col">
 
@@ -43,8 +43,14 @@
         type="button"
         id="connectBtn"
         class="wallet-btn wallet-btn-other"
-        title="Connect with MetaMask, WalletConnect, Coinbase, and more"
+        title="Browser wallets: MetaMask, Rabby, Trust, OKX, and more"
       >Other</button>
+      <button
+        type="button"
+        id="walletConnectBtn"
+        class="wallet-btn wallet-btn-wc"
+        title="WalletConnect (mobile QR — separate from Other)"
+      >WalletConnect</button>
     </div>
   </nav>
 
@@ -108,20 +114,20 @@
     </div>
   </div>
 
-  <script src="/js/config.js?v=44"></script>
-  <script src="/js/ui.js?v=44"></script>
-  <script src="/js/StakingPlatformV4.js?v=44"></script>
-  <script src="/js/stakingAbi.js?v=44"></script>
-  <script src="/js/contracts.js?v=44"></script>
-  <script src="/js/wallet.js?v=44"></script>
-  <script src="/js/apy.js?v=44"></script>
-  <script src="/js/calculator.js?v=44"></script>
-  <script src="/js/pools.js?v=44"></script>
-  <script src="/js/poolRenderer.js?v=44"></script>
-  <script src="/js/activeSince.js?v=44"></script>
-  <script src="/js/app.js?v=44"></script>
+  <script src="/js/config.js?v=45"></script>
+  <script src="/js/ui.js?v=45"></script>
+  <script src="/js/StakingPlatformV4.js?v=45"></script>
+  <script src="/js/stakingAbi.js?v=45"></script>
+  <script src="/js/contracts.js?v=45"></script>
+  <script src="/js/wallet.js?v=45"></script>
+  <script src="/js/apy.js?v=45"></script>
+  <script src="/js/calculator.js?v=45"></script>
+  <script src="/js/pools.js?v=45"></script>
+  <script src="/js/poolRenderer.js?v=45"></script>
+  <script src="/js/activeSince.js?v=45"></script>
+  <script src="/js/app.js?v=45"></script>
   <!-- RainbowKit multi-wallet modal (loads after wallet.js) -->
-  <script src="/js/rainbow-bridge.js?v=44" defer></script>
+  <script src="/js/rainbow-bridge.js?v=45" defer></script>
   <script>
     (function () {
       var modal = document.getElementById('calculatorModal');
