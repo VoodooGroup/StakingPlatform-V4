@@ -344,40 +344,42 @@
     const btn = document.getElementById('voodooWalletBtn');
     if (!btn || btn.dataset.bound) return;
     btn.dataset.bound = '1';
+    let clickGen = 0;
 
     btn.addEventListener('click', async () => {
-      // Already connected with Voodoo — do nothing (address shown on button)
+      // Already connected with Voodoo — address is on the button
       if (userAddress && window.VoodooWallet.getActiveWalletKind() === 'voodoo') return;
 
-      // Prevent double-fire while a request is in flight, but ALWAYS re-enable in finally
-      if (btn.dataset.connecting === '1') return;
-      btn.dataset.connecting = '1';
-      btn.disabled = true;
+      // Each click starts a NEW attempt (second click after close must work).
+      // Do NOT ignore clicks while a previous request is still hanging.
+      const gen = ++clickGen;
+      btn.disabled = false; // stay clickable so user can retry immediately
       setVoodooBtnLabel(null);
 
       try {
-        // Drop any stale "connected" leftover so second click re-opens extension
-        if (!userAddress) {
-          window.VoodooWallet.clearActiveWallet?.();
-        }
+        window.VoodooWallet.clearActiveWallet?.();
         const result = await window.VoodooWallet.connectVoodoo();
+        // Ignore stale response if user clicked again meanwhile
+        if (gen !== clickGen) return;
         await onWalletConnected(result);
       } catch (err) {
+        if (gen !== clickGen) return;
         resetWalletUi();
         setVoodooBtnLabel(null);
         document.getElementById('voodooConnectError')?.remove();
         const quiet = err?.code === 4001
           || err?.code === 'ACTION_REJECTED'
-          || /reject|denied|cancel/i.test(err?.message || '');
+          || err?.code === 'VOODOO_TIMEOUT'
+          || /reject|denied|cancel|did not respond/i.test(err?.message || '');
         if (!quiet) {
           await showConnectError('Voodoo Wallet connection failed', err);
         }
       } finally {
-        btn.dataset.connecting = '0';
-        // Re-enable unless we successfully connected as Voodoo
-        if (!(userAddress && window.VoodooWallet.getActiveWalletKind() === 'voodoo')) {
-          btn.disabled = false;
-          if (!userAddress) setVoodooBtnLabel(null);
+        if (gen === clickGen) {
+          if (!(userAddress && window.VoodooWallet.getActiveWalletKind() === 'voodoo')) {
+            btn.disabled = false;
+            if (!userAddress) setVoodooBtnLabel(null);
+          }
         }
       }
     });

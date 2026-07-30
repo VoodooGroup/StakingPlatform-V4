@@ -226,29 +226,6 @@ window.VoodooWallet = (function () {
     try {
       onStatus?.('requesting');
 
-      /**
-       * Always re-open the extension UI for Voodoo.
-       * Skipping with eth_accounts (when empty/hanging) left second clicks dead:
-       * first eth_requestAccounts can hang if the user closed the popup without reject.
-       */
-      const requestOpen = async () => {
-        // Prefer permissions re-prompt when supported (forces popup again)
-        if (kind === 'voodoo') {
-          try {
-            await ethereum.request({
-              method: 'wallet_requestPermissions',
-              params: [{ eth_accounts: {} }],
-            });
-          } catch (permErr) {
-            // 4001 user reject → bubble up; method not supported → fall through
-            if (permErr?.code === 4001 || /reject|denied/i.test(String(permErr?.message || ''))) {
-              throw permErr;
-            }
-          }
-        }
-        return ethereum.request({ method: 'eth_requestAccounts' });
-      };
-
       const withTimeout = (p, ms) =>
         Promise.race([
           p,
@@ -256,7 +233,7 @@ window.VoodooWallet = (function () {
             setTimeout(() => {
               const err = new Error(
                 kind === 'voodoo'
-                  ? 'Voodoo Wallet did not respond. Open the extension, unlock it, then try again.'
+                  ? 'Voodoo Wallet did not respond. Close the extension popup if it is stuck, unlock, then click Voodoo Wallet again.'
                   : 'Wallet did not respond. Try again.',
               );
               err.code = 'VOODOO_TIMEOUT';
@@ -266,8 +243,16 @@ window.VoodooWallet = (function () {
         ]);
 
       if (kind === 'voodoo') {
-        // Always prompt — never short-circuit on eth_accounts
-        accounts = await withTimeout(requestOpen(), 90_000);
+        /**
+         * Standalone Voodoo Wallet BUTTON path:
+         * Always call eth_requestAccounts so the extension opens every click.
+         * Never short-circuit with eth_accounts (that skipped the popup on retry).
+         * Shorter timeout so a closed popup does not block the next click forever.
+         */
+        accounts = await withTimeout(
+          ethereum.request({ method: 'eth_requestAccounts' }),
+          45_000,
+        );
       } else {
         try {
           accounts = await ethereum.request({ method: 'eth_accounts' });
@@ -497,6 +482,7 @@ window.VoodooWallet = (function () {
 
   async function connectVoodoo(onStatus) {
     onStatus?.('detecting');
+    // Fresh lookup every click (extension may inject late / after close)
     const ethereum = await getVoodooWalletProvider();
     if (!ethereum) {
       const info = await diagnose();
@@ -512,6 +498,10 @@ window.VoodooWallet = (function () {
       throw err;
     }
     onStatus?.('opening');
+    // Clear any previous session flags so retry is a clean eth_requestAccounts
+    if (activeWalletKind === 'voodoo') {
+      clearActiveWallet();
+    }
     return connectWithProvider(ethereum, 'voodoo', onStatus);
   }
 
