@@ -257,12 +257,51 @@
     btn.dataset.bound = '1';
 
     btn.addEventListener('click', async () => {
-      // Always keep button clickable — WalletConnect must never lock Other
+      // Never disable — WalletConnect must not lock this button
       btn.disabled = false;
-      btn.textContent = userAddress && isOtherWalletKind(window.VoodooWallet.getActiveWalletKind())
-        ? shortAddress(userAddress)
-        : 'Other';
 
+      const kind = window.VoodooWallet.getActiveWalletKind();
+      if (userAddress && isOtherWalletKind(kind)) {
+        btn.textContent = shortAddress(userAddress);
+        // Open account modal; if that fails, force wallet list
+        try {
+          const ok = await window.VoodooRainbow?.openConnectModal?.({ mode: 'account' });
+          if (ok === false) {
+            await window.VoodooRainbow?.openConnectModal?.({ forceConnect: true });
+          }
+        } catch (e) {
+          console.warn(e);
+          try {
+            await window.VoodooRainbow?.openConnectModal?.({ forceConnect: true });
+          } catch {
+            /* ignore */
+          }
+        }
+        return;
+      }
+
+      btn.textContent = 'Other';
+
+      // 1) Open modal first (must work even after failed WC)
+      try {
+        const opened = await window.VoodooRainbow?.openConnectModal?.({
+          mode: 'connect',
+          forceConnect: true,
+        });
+        if (opened === false) {
+          await showConnectError(
+            'Could not open wallet list',
+            new Error('RainbowKit did not open. Wait 2 seconds and click Other again.'),
+          );
+          return;
+        }
+      } catch (e) {
+        console.error(e);
+        await showConnectError('Could not open wallet list', e);
+        return;
+      }
+
+      // 2) Wait for a wallet connection in the background (do not block reopen)
       try {
         const result = await window.VoodooWallet.connectOther();
         if (result?.userAddress) {
@@ -274,23 +313,10 @@
           || err?.code === 'ACTION_REJECTED'
           || err?.code === 'restart'
           || /timed out|cancelled|rejected|denied|restart/i.test(err?.message || '');
-        if (quiet) {
-          btn.disabled = false;
-          if (!userAddress) btn.textContent = 'Other';
-          return;
+        if (!quiet) {
+          console.error('Other wallet connect error', err);
         }
-        console.error('Other wallet connect error', err);
-        // Ensure next click can open RainbowKit
-        try {
-          await window.VoodooRainbow?.hardReset?.();
-        } catch {
-          /* ignore */
-        }
-        btn.disabled = false;
-        if (!userAddress) btn.textContent = 'Other';
-        await showConnectError('Connection failed', err);
-      } finally {
-        btn.disabled = false;
+        // Leave UI free for next Other click
         if (!userAddress) btn.textContent = 'Other';
       }
     });

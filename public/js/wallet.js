@@ -350,35 +350,31 @@ window.VoodooWallet = (function () {
   }
 
   /**
-   * Open RainbowKit via ConnectButton bridge.
-   * Always force-opens wallet list (disconnects first if WC left a zombie session).
+   * Wait for RainbowKit connection event only.
+   * Opening the modal is done by app.js via VoodooRainbow.openConnectModal first.
    */
   async function connectOther(onStatus) {
     onStatus?.('opening');
-    const rk = await waitForRainbowReady();
+    await waitForRainbowReady();
 
-    // Live dapp session → account modal
+    // Already wired
     if (activeProvider && activeWalletKind === 'rainbow') {
       try {
-        await rk.openConnectModal?.({ mode: 'account' });
         const provider = new ethers.providers.Web3Provider(activeProvider, 'any');
         const signer = provider.getSigner();
-        const userAddress = await signer.getAddress().catch(() => rk.getAddress?.());
-        if (userAddress) {
-          return {
-            ethereum: activeProvider,
-            provider,
-            signer,
-            userAddress,
-            walletKind: 'rainbow',
-          };
-        }
+        const userAddress = await signer.getAddress();
+        return {
+          ethereum: activeProvider,
+          provider,
+          signer,
+          userAddress,
+          walletKind: 'rainbow',
+        };
       } catch {
         clearActiveWallet();
       }
     }
 
-    // Cancel stuck waiter from previous attempt so we never block Other forever
     if (pendingRainbowConnect) {
       cancelPendingRainbow('restart');
     }
@@ -388,7 +384,6 @@ window.VoodooWallet = (function () {
     pendingRainbowConnect = new Promise((resolve, reject) => {
       let settled = false;
       pendingReject = reject;
-      let sawConnected = false;
 
       const cleanup = () => {
         settled = true;
@@ -408,7 +403,6 @@ window.VoodooWallet = (function () {
 
       async function onConnected(event) {
         if (settled || epoch !== connectEpoch) return;
-        sawConnected = true;
         const detail = event?.detail || {};
         const provider = detail.provider;
         const preAddress = detail.address;
@@ -442,22 +436,7 @@ window.VoodooWallet = (function () {
 
       window.addEventListener('voodoo:rainbow-connected', onConnected);
       window.addEventListener('voodoo:rainbow-error', onError);
-
-      // Always open connect list (bridge disconnects zombie WC sessions first)
-      Promise.resolve()
-        .then(() => rk.openConnectModal?.({ mode: 'connect', forceConnect: true }))
-        .then((opened) => {
-          if (settled || epoch !== connectEpoch) return;
-          if (opened === false) {
-            cleanup();
-            reject(new Error('Could not open wallet modal. Please hard-refresh (Ctrl+Shift+R).'));
-          }
-        })
-        .catch((err) => {
-          if (settled || epoch !== connectEpoch) return;
-          cleanup();
-          reject(err instanceof Error ? err : new Error(String(err)));
-        });
+      // Modal is already opened by app.js — we only wait for the wallet event
     }).finally(() => {
       if (epoch === connectEpoch) {
         pendingRainbowConnect = null;
