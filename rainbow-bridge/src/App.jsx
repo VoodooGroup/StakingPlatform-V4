@@ -6,10 +6,7 @@ import {
 } from '@rainbow-me/rainbowkit';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { disconnect as coreDisconnect, getAccount, getConnections } from '@wagmi/core';
-import {
-  WagmiProvider,
-  useAccount,
-} from 'wagmi';
+import { WagmiProvider, useAccount } from 'wagmi';
 import { config, pulseChain, projectId } from './config';
 
 const queryClient = new QueryClient();
@@ -83,21 +80,17 @@ async function killAllSessions() {
     /* ignore */
   }
   clearWcStorage();
-  await sleep(120);
+  await sleep(80);
 }
 
-/**
- * RainbowKit bridge for the "Other" button.
- * WalletConnect is listed INSIDE the RainbowKit connect modal.
- */
 function BridgeInner() {
   const { address, isConnected, connector, status } = useAccount();
   const lastEmitted = useRef('');
   const openConnectFn = useRef(null);
   const openAccountFn = useRef(null);
-  const connectBtnRef = useRef(null);
+  const readyOnce = useRef(false);
 
-  // After RainbowKit connect (incl. WalletConnect) → notify static dapp
+  // Wire RainbowKit/WC connection → static staking page
   useEffect(() => {
     let cancelled = false;
 
@@ -149,19 +142,20 @@ function BridgeInner() {
   }, [isConnected, address, connector]);
 
   /**
-   * Zombie session: connected in wagmi but dapp never got provider → clear
-   * so Other can open RainbowKit again after WalletConnect.
+   * After WalletConnect, if dapp never gets a provider → kill session.
+   * Also if connected: keep state for account modal.
    */
   useEffect(() => {
     if (!isConnected || !address) return undefined;
     const t = setTimeout(() => {
       const dappOk = Boolean(window.VoodooWallet?.getActiveProvider?.());
       if (!dappOk && getAccount(config).isConnected) {
-        console.warn('[RainbowKit] clearing zombie session after WalletConnect');
-        killAllSessions().catch(() => {});
-        lastEmitted.current = '';
+        console.warn('[RainbowKit] zombie WC session — kill + allow reopen');
+        killAllSessions().then(() => {
+          lastEmitted.current = '';
+        }).catch(() => {});
       }
-    }, 3500);
+    }, 2500);
     return () => clearTimeout(t);
   }, [isConnected, address]);
 
@@ -171,56 +165,102 @@ function BridgeInner() {
   }, []);
 
   /**
-   * Open RainbowKit connect modal (wallet list with WalletConnect inside).
-   * If a session is stuck after WC, disconnect first so openConnectModal works.
+   * Open RainbowKit modal.
+   * forceConnect / after WC stuck: kill sessions + FULL REMOUNT so openConnectModal exists again.
    */
   const openConnect = useCallback(async (opts = {}) => {
+    const force = Boolean(opts.forceConnect || opts.mode === 'connect');
+    const wantAccount = opts.mode === 'account';
+
     try {
-      if (opts.mode === 'account' && isConnected && address && typeof openAccountFn.current === 'function') {
+      // Account view when fully connected
+      if (wantAccount && isConnected && address && typeof openAccountFn.current === 'function') {
         openAccountFn.current();
         return true;
       }
 
-      // Stuck or already connected → disconnect so connect list can open
-      if (
-        opts.forceConnect
-        || isConnected
+      const stuck = isConnected
         || status === 'connecting'
         || status === 'reconnecting'
-        || getAccount(config).isConnected
+        || getAccount(config).isConnected;
+
+      // Connected in dapp + not forcing list → account modal
+      if (
+        !force
+        && isConnected
+        && address
+        && window.VoodooWallet?.getActiveProvider?.()
+        && typeof openAccountFn.current === 'function'
       ) {
-        // If fully wired in dapp and user wants account, already handled above
-        if (!opts.forceConnect && isConnected && address && opts.mode !== 'connect') {
-          if (typeof openAccountFn.current === 'function') {
-            openAccountFn.current();
-            return true;
-          }
-        }
-        await killAllSessions();
-        for (let i = 0; i < 50; i++) {
-          await sleep(40);
-          if (!getAccount(config).isConnected && typeof openConnectFn.current === 'function') break;
-        }
+        openAccountFn.current();
+        return true;
       }
 
-      if (typeof openConnectFn.current === 'function') {
+      // Clean first open — do NOT remount (that broke first load before)
+      if (!stuck && typeof openConnectFn.current === 'function') {
         openConnectFn.current();
         return true;
       }
-      const el = document.getElementById('voodoo-rk-connect-btn');
-      if (el) {
-        el.click();
-        return true;
+
+      // --- After WalletConnect: session stuck → kill + remount RK tree ---
+      await killAllSessions();
+      lastEmitted.current = '';
+
+      if (typeof window.__voodooRemountRainbowKit === 'function') {
+        const ok = await new Promise((resolve) => {
+          let done = false;
+          const finish = (v) => {
+            if (done) return;
+            done = true;
+            window.removeEventListener('voodoo:rainbow-ready', onReady);
+            clearTimeout(timer);
+            resolve(v);
+          };
+          const onReady = () => {
+            setTimeout(() => finish(true), 150);
+          };
+          window.addEventListener('voodoo:rainbow-ready', onReady);
+          const timer = setTimeout(() => finish(false), 4000);
+          window.__voodooRemountRainbowKit();
+        });
+
+        if (ok && typeof window.VoodooRainbow?.__openConnectRaw === 'function') {
+          window.VoodooRainbow.__openConnectRaw();
+          return true;
+        }
       }
-      console.error('[RainbowKit] openConnectModal unavailable');
+
+      // Fallback poll
+      for (let i = 0; i < 50; i++) {
+        await sleep(40);
+        if (typeof openConnectFn.current === 'function' && !getAccount(config).isConnected) {
+          openConnectFn.current();
+          return true;
+        }
+        const el = document.getElementById('voodoo-rk-connect-btn');
+        if (el && !getAccount(config).isConnected) {
+          el.click();
+          return true;
+        }
+      }
       return false;
     } catch (e) {
-      console.error('[RainbowKit] open failed', e);
+      console.error('[RainbowKit] openConnect failed', e);
       return false;
     }
   }, [isConnected, address, status]);
 
+  // Publish API (called on every mount/remount)
   useEffect(() => {
+    const rawOpen = () => {
+      if (typeof openConnectFn.current === 'function') {
+        openConnectFn.current();
+        return true;
+      }
+      document.getElementById('voodoo-rk-connect-btn')?.click();
+      return true;
+    };
+
     window.VoodooRainbow = Object.assign(window.VoodooRainbow || {}, {
       ready: true,
       engine: 'rainbowkit',
@@ -228,12 +268,14 @@ function BridgeInner() {
       status,
       wagmiConnected: Boolean(isConnected && address),
       openConnectModal: openConnect,
+      /** Used after remount — call open without kill/remount loop */
+      __openConnectRaw: rawOpen,
       openAccountModal: () => {
         if (typeof openAccountFn.current === 'function') {
           openAccountFn.current();
           return true;
         }
-        return openConnect({ mode: 'account' });
+        return false;
       },
       hardReset,
       disconnect: hardReset,
@@ -242,6 +284,10 @@ function BridgeInner() {
       getStatus: () => status,
     });
     window.dispatchEvent(new CustomEvent('voodoo:rainbow-ready'));
+    if (!readyOnce.current) {
+      readyOnce.current = true;
+      console.info('[RainbowKit] ready — WalletConnect is in Other modal');
+    }
   }, [isConnected, address, status, openConnect, hardReset]);
 
   return (
@@ -267,10 +313,8 @@ function BridgeInner() {
           openChainModal,
           mounted,
         }) => {
-          // Keep openers live for the Other button
           openConnectFn.current = typeof openConnectModal === 'function' ? openConnectModal : null;
           openAccountFn.current = typeof openAccountModal === 'function' ? openAccountModal : null;
-
           const connected = Boolean(mounted && account && chain);
 
           return (
@@ -283,7 +327,7 @@ function BridgeInner() {
                 Connect
               </button>
               {connected ? (
-                <button type="button" onClick={() => openAccountModal?.()}>
+                <button type="button" id="voodoo-rk-account-btn" onClick={() => openAccountModal?.()}>
                   Account
                 </button>
               ) : null}

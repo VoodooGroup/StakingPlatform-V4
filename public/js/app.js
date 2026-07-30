@@ -281,25 +281,44 @@
       }
 
       try {
-        // Opens RainbowKit modal — WalletConnect is inside that list
+        // Always forceConnect: after WalletConnect, remounts RK so modal can open again
         const opened = await window.VoodooRainbow.openConnectModal({
           mode: 'connect',
           forceConnect: true,
         });
         if (opened === false) {
-          await showConnectError(
-            'Could not open RainbowKit',
-            new Error('Modal did not open. Refresh the page and try again.'),
-          );
-          return;
+          // One more hard attempt
+          try {
+            await window.VoodooRainbow?.hardReset?.();
+            if (typeof window.__voodooRemountRainbowKit === 'function') {
+              window.__voodooRemountRainbowKit();
+              await new Promise((r) => setTimeout(r, 400));
+            }
+            const again = await window.VoodooRainbow?.openConnectModal?.({
+              mode: 'connect',
+              forceConnect: true,
+            });
+            if (again === false) {
+              await showConnectError(
+                'Could not open RainbowKit',
+                new Error('Modal did not open. Refresh the page (F5) and try again.'),
+              );
+              return;
+            }
+          } catch (e2) {
+            await showConnectError('Could not open RainbowKit', e2);
+            return;
+          }
         }
       } catch (e) {
         await showConnectError('Could not open RainbowKit', e);
         return;
       }
 
-      // Wait for wallet pick (incl. WalletConnect) → wire staking
+      // Wait for wallet pick (incl. WalletConnect inside RainbowKit)
       try {
+        // Cancel any previous waiter so a second Other click always works
+        window.VoodooWallet?.cancelPendingRainbow?.('restart');
         const result = await window.VoodooWallet.connectOther();
         if (result?.userAddress) {
           await onWalletConnected(result);
@@ -308,9 +327,9 @@
         const quiet = err?.code === 'TIMEOUT'
           || err?.code === 4001
           || err?.code === 'ACTION_REJECTED'
-          || /timed out|cancelled|rejected|denied/i.test(err?.message || '');
+          || err?.code === 'restart'
+          || /timed out|cancelled|rejected|denied|restart/i.test(err?.message || '');
         if (!quiet) console.error('RainbowKit connect error', err);
-        // Clear zombie WC session so Other can open again
         try {
           await window.VoodooRainbow?.hardReset?.();
         } catch {
