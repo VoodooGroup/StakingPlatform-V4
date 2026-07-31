@@ -245,18 +245,41 @@ function BridgeInner() {
   }, [isConnected, address, connector]);
 
   /**
-   * After WalletConnect, if dapp never gets a provider → kill session.
-   * Also if connected: keep state for account modal.
+   * Zombie cleanup for WalletConnect ONLY.
+   * Never kill injected / Voodoo sessions: when the user connects via the
+   * standalone Voodoo button, RainbowKit's injected connector also lights up;
+   * killAllSessions() used to wipe that ~2.5s later and the dapp "forgot" the wallet.
    */
   useEffect(() => {
     if (!isConnected || !address) return undefined;
     const t = setTimeout(() => {
-      const dappOk = Boolean(window.VoodooWallet?.getActiveProvider?.());
-      if (!dappOk && getAccount(config).isConnected) {
+      try {
+        const acc = getAccount(config);
+        if (!acc?.isConnected) return;
+
+        const dappOk = Boolean(window.VoodooWallet?.getActiveProvider?.());
+        if (dappOk) return;
+
+        const id = String(acc.connector?.id || '').toLowerCase();
+        const name = String(acc.connector?.name || '').toLowerCase();
+        const isWalletConnect =
+          id.includes('walletconnect')
+          || id.includes('wallet_connect')
+          || name.includes('walletconnect')
+          || id === 'voodoo-walletconnect';
+
+        // Injected / browser extension (Voodoo, MetaMask, …) — leave alone
+        if (!isWalletConnect) {
+          console.info('[RainbowKit] skip zombie kill for non-WC connector', id || name);
+          return;
+        }
+
         console.warn('[RainbowKit] zombie WC session — kill + allow reopen');
         killAllSessions().then(() => {
           lastEmitted.current = '';
         }).catch(() => {});
+      } catch (e) {
+        console.warn('[RainbowKit] zombie check failed', e);
       }
     }, 2500);
     return () => clearTimeout(t);
