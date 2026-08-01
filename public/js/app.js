@@ -203,8 +203,8 @@
     if (err.code === 4001 || err.code === 'ACTION_REJECTED' || /user rejected|user denied|rejected the request/i.test(msg)) {
       return 'Connection was cancelled in your wallet.';
     }
-    if (err.code === 'VOODOO_NOT_FOUND' || /Voodoo Wallet not detected/i.test(msg)) {
-      return 'Voodoo Wallet was not detected. Install the extension, then refresh this page and try again.';
+    if (err.code === 'VOODOO_NOT_FOUND' || /Voodoo Wallet not detected|not detected/i.test(msg)) {
+      return 'Voodoo Wallet was not detected. Install the extension, open it and sign in, then refresh this page and try again.';
     }
     if (/MetaMask|no ethereum|no injected|wallet not found|not detected/i.test(msg)) {
       return 'No browser wallet was found. Install MetaMask (or another wallet), then try again.';
@@ -224,7 +224,7 @@
     return null;
   }
 
-  /** Show modern centered modal — never browser alert(). */
+  /** Show modern centered modal — never browser alert(). Same as Plinko/Miner. */
   function showConnectError(title, err) {
     // Optional console-only diagnose when explicitly enabled
     if (window.VoodooUI?.isDebug?.()) {
@@ -236,15 +236,17 @@
     }
 
     const message = connectionErrorMessage(err);
-    const linkUrl = connectionInstallUrl(err);
+    const dialogTitle =
+      err?.code === 'VOODOO_NOT_FOUND' ||
+      /Voodoo Wallet not detected|not detected/i.test(err?.message || '')
+        ? 'Voodoo Wallet'
+        : title || 'Voodoo Wallet';
     const ui = window.VoodooUI;
     if (ui?.alert) {
       return ui.alert(message, {
-        title,
+        title: dialogTitle,
         type: 'error',
         okText: 'OK',
-        linkUrl: linkUrl || undefined,
-        linkText: 'Install Voodoo Wallet',
       });
     }
     // Fallback only if ui.js failed to load
