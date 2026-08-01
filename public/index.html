@@ -16,15 +16,21 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/staking.css?v=73" />
-  <!-- wp_head equivalent: exact Custom scrollbar Plugin CSS -->
-  <link rel="stylesheet" href="/css/windows-scrollbar.css?v=1" />
+  <link rel="stylesheet" href="/css/staking.css?v=74" />
+  <!-- Exact Custom scrollbar Plugin CSS (selectors: .windows-scrollbar) -->
+  <link rel="stylesheet" href="/css/windows-scrollbar.css?v=2" />
   <link rel="stylesheet" href="/js/rainbow-bridge.css?v=69" />
 </head>
-<body class="flex flex-col windows-scrollbar">
+<body>
 
   <div id="voodoo-bg" aria-hidden="true" style="background-image:url('/voodoo-token-background.png')"></div>
 
+  <!--
+    #page-scroll.windows-scrollbar is REQUIRED on modern Chrome/Edge:
+    root/body overlay scrollbars ignore ::-webkit-scrollbar.
+    Plugin CSS targets .windows-scrollbar — class lives on this scroller.
+  -->
+  <div id="page-scroll" class="windows-scrollbar">
   <nav class="flex items-center justify-between p-4 shadow-md bg-white">
     <div class="flex items-center pl-4 space-x-6">
       <a href="https://voodootoken.com/staking-quide/" target="_blank" rel="noopener noreferrer">
@@ -50,9 +56,6 @@
     </div>
   </nav>
 
-  <!-- RainbowKit island (WalletConnect is inside this modal) -->
-  <div id="rainbowkit-root"></div>
-
   <div class="flex justify-center mt-6 mb-4">
     <img data-sp4="flowIcons" src="/icons.png" alt="Staking flow" class="w-64 h-auto" style="background:transparent" />
   </div>
@@ -61,11 +64,11 @@
     Active Since: calculating...
   </h1>
 
-  <main class="flex-grow p-4 md:p-8 max-w-7xl mx-auto">
+  <main class="flex-grow p-4 md:p-8 max-w-7xl mx-auto w-full">
     <div id="poolsGrid" class="grid grid-cols-1 md:grid-cols-3 gap-8"></div>
   </main>
 
-  <footer class="bg-black text-white py-3 mt-auto">
+  <footer class="bg-black text-white py-3 mt-auto w-full">
     <div class="px-5 flex flex-col md:flex-row justify-between items-center">
       <p id="footerCopyright" data-sp4="footerText" class="text-sm order-1 md:order-1">&copy; 2026 VoodooGroup &bull; All rights reserved</p>
       <div class="flex space-x-6 order-2 md:order-2">
@@ -75,6 +78,10 @@
       </div>
     </div>
   </footer>
+  </div><!-- /#page-scroll -->
+
+  <!-- RainbowKit island outside scroller (fixed modals / portals) -->
+  <div id="rainbowkit-root"></div>
 
   <div id="calculatorModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
     <div class="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto windows-scrollbar relative">

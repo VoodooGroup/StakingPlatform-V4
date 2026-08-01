@@ -1,10 +1,10 @@
 ﻿* { user-select: none; -webkit-user-select: none; -moz-user-select: none; -ms-user-select: none; }
 
 /*
- * WordPress-identical scroll model:
- * class windows-scrollbar is on <body>
- * body is the scrolling element (overflow-y: scroll)
- * scrollbar rules live in /css/windows-scrollbar.css (exact plugin CSS)
+ * Scroll model for modern Chrome/Edge:
+ * Overlay root scrollbars ignore ::-webkit-scrollbar on body/html.
+ * Scroll happens on #page-scroll.windows-scrollbar so the EXACT plugin CSS
+ * (.windows-scrollbar::-webkit-*) applies and is visible (proven on this dApp).
  */
 html {
   height: 100%;
@@ -17,11 +17,28 @@ body {
   color: white;
   margin: 0;
   height: 100%;
-  overflow-x: hidden;
-  overflow-y: scroll;
+  overflow: hidden; /* scroll is on #page-scroll, not body */
   background-color: transparent !important;
   position: relative;
   z-index: 1;
+  display: block;
+}
+
+/* Scrolling element — must carry class windows-scrollbar (plugin selectors) */
+#page-scroll {
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  max-height: 100vh;
+  max-height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: scroll; /* always reserve classic scrollbar track */
+  -webkit-overflow-scrolling: touch;
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+  width: 100%;
+  box-sizing: border-box;
 }
 
 #voodoo-bg {
@@ -44,10 +61,12 @@ body {
  * IMPORTANT: never apply this to RainbowKit portals ([data-rk]) or the RK root —
  * forcing position/z-index on every body child breaks multi-step wallet screens.
  */
-body > *:not(#voodoo-bg):not(#calculatorModal):not(#voodooUiModal):not(#rainbowkit-root):not([data-rk]) {
+body > *:not(#voodoo-bg):not(#calculatorModal):not(#voodooUiModal):not(#rainbowkit-root):not(#page-scroll):not([data-rk]) {
   position: relative;
   z-index: 1;
 }
+
+/* #page-scroll already has z-index: 1; keep pool content above bg */
 
 .pool-wrapper { text-align: center; margin-bottom: 1.5rem; }
 .pool-logo-wrap {
