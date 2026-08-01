@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="en" class="windows-scrollbar">
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
@@ -16,14 +16,15 @@
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/4.7.0/css/font-awesome.min.css">
   <script src="https://unpkg.com/ethers@5.7.2/dist/ethers.umd.min.js"></script>
-  <link rel="stylesheet" href="/css/staking.css?v=72" />
+  <link rel="stylesheet" href="/css/staking.css?v=73" />
+  <!-- wp_head equivalent: exact Custom scrollbar Plugin CSS -->
+  <link rel="stylesheet" href="/css/windows-scrollbar.css?v=1" />
   <link rel="stylesheet" href="/js/rainbow-bridge.css?v=69" />
 </head>
-<body class="windows-scrollbar">
+<body class="flex flex-col windows-scrollbar">
 
   <div id="voodoo-bg" aria-hidden="true" style="background-image:url('/voodoo-token-background.png')"></div>
 
-  <div id="page-scroll" class="windows-scrollbar">
   <nav class="flex items-center justify-between p-4 shadow-md bg-white">
     <div class="flex items-center pl-4 space-x-6">
       <a href="https://voodootoken.com/staking-quide/" target="_blank" rel="noopener noreferrer">
@@ -74,7 +75,6 @@
       </div>
     </div>
   </footer>
-  </div><!-- /#page-scroll -->
 
   <div id="calculatorModal" class="fixed inset-0 bg-black bg-opacity-80 flex items-center justify-center z-50 hidden">
     <div class="bg-gray-800 rounded-xl shadow-2xl max-w-lg w-full mx-4 max-h-[90vh] overflow-y-auto windows-scrollbar relative">
